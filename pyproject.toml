@@ -1,0 +1,69 @@
+[project]
+name = "evas"
+version = "0.1.0"
+description = "EVAS — Egocentric Video Audit System"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.135",
+    "uvicorn[standard]>=0.41",
+    "sqlalchemy>=2.0",
+    "alembic>=1.18",
+    "psycopg2-binary>=2.9",
+    "pydantic>=2.12",
+    "pydantic-settings>=2.13",
+    "anthropic>=0.84",
+    "boto3>=1.43",
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "mypy>=1.0", "ruff>=0.15", "boto3-stubs[s3]"]
+
+[project.scripts]
+evas = "evas.cli:cli"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "app", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI dependency-injection idiom uses these in argument defaults.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body"]
+
+[tool.ruff.lint.per-file-ignores]
+# The initial migration embeds evas_schema.sql verbatim; do not reflow its DDL.
+"alembic/versions/0001_initial_schema.py" = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false

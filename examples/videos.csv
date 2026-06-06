@@ -1,0 +1,3 @@
+source_uri,external_ref,original_filename,priority
+s3://evas-videos/acme/00043.mp4,00043,line1_morning.mp4,normal
+s3://evas-videos/acme/00044.mp4,00044,line1_afternoon.mp4,high
