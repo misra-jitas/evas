@@ -20,6 +20,10 @@ os.environ["EVAS_DATABASE_URL"] = (
 )
 os.environ.setdefault("EVAS_ANTHROPIC_API_KEY", "test-key")
 os.environ.setdefault("EVAS_S3_BUCKET_FRAMES", "evas-frames")
+# Keep tests hermetic from a developer's local .env: the fake AI reviewer and
+# explicit bootstrap settings are controlled by the tests themselves.
+os.environ["EVAS_AI_STUB"] = "false"
+os.environ["EVAS_BOOTSTRAP_TOKEN"] = ""
 
 
 def _create_test_db() -> None:

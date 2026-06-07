@@ -129,3 +129,37 @@ def _normalize_findings(
             confidence = 0.0
         out[key] = {"value": value, "confidence": max(0.0, min(1.0, confidence))}
     return out
+
+
+class StubReviewer:
+    """Deterministic offline reviewer for local dev (EVAS_AI_STUB=true).
+
+    Produces stable findings derived from the frame bytes so the pipeline runs
+    end-to-end without calling Anthropic. No tokens, no cost.
+    """
+
+    model = "stub"
+    prompt_version = PROMPT_VERSION
+
+    def review_frame(
+        self, image_bytes: bytes, items: list[dict[str, Any]], media_type: str = "image/jpeg"
+    ) -> FrameReview:
+        seed = sum(image_bytes[:64])
+        findings = {
+            item["key"]: {"value": (seed + i) % 2 == 0, "confidence": 0.9}
+            for i, item in enumerate(items)
+        }
+        return FrameReview(
+            description="stub review (offline)",
+            findings=findings,
+            tokens_in=0,
+            tokens_out=0,
+            cost_usd=0.0,
+        )
+
+
+def get_reviewer() -> AiReviewer | StubReviewer:
+    """Return the configured reviewer: the offline stub when EVAS_AI_STUB is set."""
+    if get_settings().ai_stub:
+        return StubReviewer()
+    return AiReviewer()

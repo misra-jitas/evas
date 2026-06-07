@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     ai_model: str = "claude-haiku-4-5"
     ai_max_tokens: int = 1024
+    # Local/dev: use a deterministic offline reviewer instead of calling Anthropic.
+    ai_stub: bool = False
     # Findings below this min-confidence get flagged for human attention.
     confidence_flag_threshold: float = 0.75
 

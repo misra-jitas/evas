@@ -16,20 +16,26 @@ from __future__ import annotations
 import csv
 import datetime
 import logging
+import os
+import subprocess
+import tempfile
 import uuid
 
 import click
+from botocore.exceptions import ClientError
 from sqlalchemy import func, select
 
 from evas import worker as worker_module
 from evas.audit import write_audit
 from evas.auth import create_access_token
 from evas.checklists import EXAMPLE_CHECKLIST_ITEMS, EXAMPLE_CHECKLIST_NAME
+from evas.config import get_settings
 from evas.db import session_scope
 from evas.enums import JobType, UserRole, VideoPriority
 from evas.export import export_to_file
 from evas.jobs import enqueue
-from evas.models import Checklist, Client, Frame, User, Video
+from evas.models import AiRun, Checklist, Client, Frame, User, Video
+from evas.storage import get_s3_client, upload_file
 
 
 @click.group()
@@ -43,7 +49,11 @@ def cli() -> None:
 def seed_client(name: str, slug: str) -> None:
     """Create a client and its active example checklist."""
     with session_scope() as session:
-        client = Client(name=name, slug=slug, sampling_config={})
+        client = Client(
+            name=name,
+            slug=slug,
+            sampling_config={"interval_seconds": 1, "max_frames": 300, "frame_width": 640},
+        )
         session.add(client)
         session.flush()
         checklist = Checklist(
@@ -207,6 +217,84 @@ def retention_sweep() -> None:
                     enqueue(session, job_type=JobType.archive, video_id=video.id)
                     archive_jobs += 1
     click.echo(f"enqueued {purge_jobs} purge_frames and {archive_jobs} archive job(s)")
+
+
+@cli.command("create-buckets")
+def create_buckets() -> None:
+    """Create the configured S3 buckets (idempotent; works against MinIO)."""
+    settings = get_settings()
+    s3 = get_s3_client()
+    for bucket in (settings.s3_bucket_videos, settings.s3_bucket_frames):
+        try:
+            s3.create_bucket(Bucket=bucket)
+            click.echo(f"created bucket {bucket}")
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code", "")
+            if code in ("BucketAlreadyOwnedByYou", "BucketAlreadyExists"):
+                click.echo(f"bucket {bucket} already exists")
+            else:
+                raise
+
+
+@cli.command("demo")
+@click.option("--slug", required=True, help="Client slug created by seed-client.")
+@click.option("--duration", default=3, show_default=True)
+def demo(slug: str, duration: int) -> None:
+    """Generate a test video and run it through the whole pipeline locally."""
+    settings = get_settings()
+    with session_scope() as session:
+        client = session.scalars(select(Client).where(Client.slug == slug)).first()
+        if client is None:
+            raise click.ClickException(f"no client with slug {slug!r}; run seed-client first")
+        client_id = client.id
+
+    os.makedirs(settings.work_dir, exist_ok=True)
+    fd, video_path = tempfile.mkstemp(dir=settings.work_dir, suffix=".mp4")
+    os.close(fd)
+    try:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                f"testsrc=duration={duration}:size=320x240:rate=10",
+                "-pix_fmt",
+                "yuv420p",
+                video_path,
+            ],
+            check=True,
+        )
+        key = f"demo/{uuid.uuid4().hex}.mp4"
+        source_uri = upload_file(video_path, settings.s3_bucket_videos, key, "video/mp4")
+        click.echo(f"uploaded {source_uri}")
+    finally:
+        if os.path.exists(video_path):
+            os.remove(video_path)
+
+    with session_scope() as session:
+        enqueue(
+            session,
+            job_type=JobType.ingest,
+            payload={"client_id": str(client_id), "source_uri": source_uri},
+        )
+    processed = 0
+    while worker_module.run_once():
+        processed += 1
+    click.echo(f"processed {processed} job(s)")
+
+    with session_scope() as session:
+        video = session.scalars(select(Video).where(Video.source_uri == source_uri)).one()
+        run = session.scalars(select(AiRun).where(AiRun.video_id == video.id)).first()
+        click.echo(f"video {video.id} status={video.status.value}")
+        if run is not None:
+            click.echo(f"ai grade={run.grade} model={run.model} cost=${run.cost_usd}")
+        path = export_to_file(session, video.id)
+        click.echo(f"export written to {path}")
 
 
 if __name__ == "__main__":

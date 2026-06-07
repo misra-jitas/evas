@@ -1,0 +1,42 @@
+# Local development stack for EVAS: Postgres + MinIO (S3-compatible).
+# Postgres is published on host port 5433 (5432 is used by another project on
+# this machine). MinIO serves the S3 API on 9000 and its console on 9001.
+services:
+  postgres:
+    image: postgres:16
+    container_name: evas-pg
+    environment:
+      POSTGRES_USER: evas
+      POSTGRES_PASSWORD: evas
+      POSTGRES_DB: evas
+    ports:
+      - "5433:5432"
+    volumes:
+      - evas_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evas -d evas"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    container_name: evas-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: evas
+      MINIO_ROOT_PASSWORD: evaspassword
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - evas_miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  evas_pgdata:
+  evas_miniodata:

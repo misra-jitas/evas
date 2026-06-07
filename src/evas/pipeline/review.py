@@ -57,7 +57,7 @@ def handle_ai_review(session: Session, job: ProcessingJob) -> None:
 
     checklist = _resolve_checklist(session, video, job)
     items = checklist.items
-    reviewer = ai.AiReviewer()
+    reviewer = ai.get_reviewer()
     settings = get_settings()
     threshold = settings.confidence_flag_threshold
 
