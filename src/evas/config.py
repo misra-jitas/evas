@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     aws_access_key_id: str | None = None
     aws_secret_access_key: str | None = None
 
+    # --- Auth (stateless JWT; no credentials stored — see Evas2.md) ---
+    jwt_secret: str = "dev-insecure-change-me"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 720
+    # Gates POST /auth/token. If empty, token minting is disabled (503).
+    bootstrap_token: str | None = None
+
+    # --- Webhooks ---
+    webhook_timeout_seconds: float = 10.0
+
     # --- Anthropic ---
     anthropic_api_key: str | None = None
     ai_model: str = "claude-haiku-4-5"

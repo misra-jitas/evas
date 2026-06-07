@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from evas.enums import VideoPriority
+from evas.enums import ReviewStatus, VideoPriority
 
 
 class VideoCreateRequest(BaseModel):
@@ -80,3 +80,61 @@ class VideoDetail(BaseModel):
     height: int | None
     latest_ai_run: AiRunOut | None
     frames: list[FrameFindingOut]
+
+
+# ---- Auth ----
+class TokenRequest(BaseModel):
+    email: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+# ---- Human review ----
+class HumanReviewCreate(BaseModel):
+    reviewer_id: uuid.UUID | None = Field(
+        None, description="Reviewer to assign; defaults to the caller (self-assign)."
+    )
+
+
+class HumanReviewUpdate(BaseModel):
+    status: ReviewStatus | None = None
+    grade: float | None = Field(None, ge=0, le=10)
+    notes: str | None = None
+
+
+class HumanReviewOut(BaseModel):
+    id: uuid.UUID
+    video_id: uuid.UUID
+    checklist_id: uuid.UUID
+    reviewer_id: uuid.UUID
+    is_qa_review: bool
+    qa_of_review: uuid.UUID | None
+    status: str
+    grade: float | None
+    notes: str | None
+    assigned_at: datetime.datetime
+    reviewed_at: datetime.datetime | None
+
+
+class FrameNoteUpsert(BaseModel):
+    note: str | None = None
+    override_findings: dict[str, Any] | None = None
+
+
+# ---- Webhooks ----
+class WebhookCreate(BaseModel):
+    url: str
+    secret: str
+    events: list[str] | None = None
+
+
+class WebhookOut(BaseModel):
+    id: uuid.UUID
+    client_id: uuid.UUID
+    url: str
+    events: list[str]
+    is_active: bool
+    created_at: datetime.datetime

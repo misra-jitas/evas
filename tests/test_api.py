@@ -1,4 +1,4 @@
-"""API tests via Starlette TestClient against the real test DB."""
+"""API tests via Starlette TestClient against the real test DB (with auth)."""
 
 from __future__ import annotations
 
@@ -37,35 +37,43 @@ def _seed_client() -> uuid.UUID:
         return c.id
 
 
-def test_health() -> None:
+def test_health_is_public() -> None:
     resp = client.get("/health")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
 
 
-def test_create_video_enqueues_job() -> None:
+def test_videos_requires_auth() -> None:
+    assert client.get("/videos").status_code == 401  # no bearer token
+
+
+def test_create_video_enqueues_job(auth_headers) -> None:
     client_id = _seed_client()
     resp = client.post(
         "/videos",
         json={"client_id": str(client_id), "source_uri": "s3://evas-videos/a/b.mp4"},
+        headers=auth_headers,
     )
     assert resp.status_code == 202
     body = resp.json()
     assert body["job_type"] == "ingest"
     assert body["status"] == "queued"
 
-    # The job is visible via the jobs endpoint.
-    job = client.get(f"/jobs/{body['job_id']}")
+    job = client.get(f"/jobs/{body['job_id']}", headers=auth_headers)
     assert job.status_code == 200
     assert job.json()["job_type"] == "ingest"
 
 
-def test_list_detail_export(fake_s3, fake_ai, sample_video_bytes) -> None:
+def test_list_detail_export(auth_headers, fake_s3, fake_ai, sample_video_bytes) -> None:
     client_id = _seed_client()
     source_uri = "s3://evas-videos/a/full.mp4"
     fake_s3.put(source_uri, sample_video_bytes)
 
-    resp = client.post("/videos", json={"client_id": str(client_id), "source_uri": source_uri})
+    resp = client.post(
+        "/videos",
+        json={"client_id": str(client_id), "source_uri": source_uri},
+        headers=auth_headers,
+    )
     assert resp.status_code == 202
     while worker.run_once():
         pass
@@ -73,30 +81,27 @@ def test_list_detail_export(fake_s3, fake_ai, sample_video_bytes) -> None:
     with session_scope() as s:
         video_id = s.scalars(select(Video.id)).one()
 
-    # List via the review board view.
-    listing = client.get("/videos", params={"client_id": str(client_id)})
+    listing = client.get("/videos", params={"client_id": str(client_id)}, headers=auth_headers)
     assert listing.status_code == 200
     rows = listing.json()
     assert len(rows) == 1
     assert rows[0]["status"] == "ai_reviewed"
     assert rows[0]["ai_grade"] is not None
 
-    # Detail with frames + findings.
-    detail = client.get(f"/videos/{video_id}")
+    detail = client.get(f"/videos/{video_id}", headers=auth_headers)
     assert detail.status_code == 200
     d = detail.json()
     assert d["latest_ai_run"]["grade"] is not None
     assert len(d["frames"]) == 2
     assert d["frames"][0]["findings"] is not None
 
-    # Export document.
-    export = client.get(f"/videos/{video_id}/export")
+    export = client.get(f"/videos/{video_id}/export", headers=auth_headers)
     assert export.status_code == 200
     ex = export.json()
     assert ex["ai_run"]["grade"] is not None
     assert len(ex["frames"]) == 2
 
 
-def test_video_not_found() -> None:
-    resp = client.get(f"/videos/{uuid.uuid4()}")
+def test_video_not_found(auth_headers) -> None:
+    resp = client.get(f"/videos/{uuid.uuid4()}", headers=auth_headers)
     assert resp.status_code == 404

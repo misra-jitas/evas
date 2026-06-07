@@ -24,6 +24,7 @@ from evas.config import get_settings
 from evas.enums import RunStatus, VideoStatus
 from evas.models import AiFrameFinding, AiRun, Checklist, Frame, ProcessingJob, Video
 from evas.storage import get_object_bytes
+from evas.webhooks import EVENT_AI_REVIEWED, enqueue_notify
 
 
 def _now() -> datetime.datetime:
@@ -127,3 +128,4 @@ def handle_ai_review(session: Session, job: ProcessingJob) -> None:
         old_status=old,
         new_status=VideoStatus.ai_reviewed.value,
     )
+    enqueue_notify(session, video.id, EVENT_AI_REVIEWED)

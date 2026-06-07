@@ -17,17 +17,28 @@ from evas.api.schemas import (
     VideoCreateRequest,
     VideoDetail,
 )
+from evas.auth import (
+    assert_can_access_client,
+    get_current_user,
+    require_roles,
+    tenancy_client_id,
+)
 from evas.db import get_session
-from evas.enums import JobType
+from evas.enums import JobType, UserRole
 from evas.export import build_export, latest_completed_run
 from evas.jobs import enqueue
-from evas.models import AiFrameFinding, Frame, ProcessingJob, Video
+from evas.models import AiFrameFinding, Frame, ProcessingJob, User, Video
 
 router = APIRouter()
+_staff = require_roles(UserRole.admin, UserRole.reviewer)
 
 
 @router.post("/videos", response_model=JobAccepted, status_code=202)
-def create_video(req: VideoCreateRequest, session: Session = Depends(get_session)) -> JobAccepted:
+def create_video(
+    req: VideoCreateRequest,
+    session: Session = Depends(get_session),
+    user: User = Depends(_staff),
+) -> JobAccepted:
     """Register a video for ingestion. Returns the queued ingest job."""
     job = enqueue(
         session,
@@ -48,12 +59,17 @@ def create_video(req: VideoCreateRequest, session: Session = Depends(get_session
 @router.get("/videos", response_model=list[ReviewBoardRow])
 def list_videos(
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
     client_id: uuid.UUID | None = None,
     status: str | None = None,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> list[ReviewBoardRow]:
     """Video review board (uses the video_review_board view)."""
+    # client_viewer is scoped to its own client regardless of the query param.
+    scope = tenancy_client_id(user)
+    if scope is not None:
+        client_id = scope
     sql = "SELECT * FROM video_review_board WHERE 1=1"
     params: dict[str, Any] = {}
     if client_id is not None:
@@ -77,9 +93,14 @@ def _get_active_video(session: Session, video_id: uuid.UUID) -> Video:
 
 
 @router.get("/videos/{video_id}", response_model=VideoDetail)
-def get_video(video_id: uuid.UUID, session: Session = Depends(get_session)) -> VideoDetail:
+def get_video(
+    video_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> VideoDetail:
     """Video detail with frames and the latest completed AI run's findings."""
     video = _get_active_video(session, video_id)
+    assert_can_access_client(user, video.client_id)
     run = latest_completed_run(session, video_id)
 
     findings_by_frame: dict[uuid.UUID, AiFrameFinding] = {}
@@ -145,8 +166,14 @@ def get_video(video_id: uuid.UUID, session: Session = Depends(get_session)) -> V
 
 
 @router.get("/videos/{video_id}/export")
-def export_video(video_id: uuid.UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
+def export_video(
+    video_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
     """Return the findings export document for a video's latest completed run."""
+    video = _get_active_video(session, video_id)
+    assert_can_access_client(user, video.client_id)
     try:
         return build_export(session, video_id)
     except LookupError as exc:
@@ -155,7 +182,11 @@ def export_video(video_id: uuid.UUID, session: Session = Depends(get_session)) -
 
 # Job status passthrough (handy for the async ingest flow).
 @router.get("/jobs/{job_id}")
-def get_job(job_id: uuid.UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
+def get_job(
+    job_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    user: User = Depends(_staff),
+) -> dict[str, Any]:
     job = session.get(ProcessingJob, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")

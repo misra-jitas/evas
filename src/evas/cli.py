@@ -1,30 +1,35 @@
 """EVAS command-line interface.
 
 Commands:
-  seed-client   create a client + the example checklist
-  import-csv    batch-enqueue ingest jobs from a CSV of S3 URIs
-  worker        run the polling worker (foreground)
-  drain         process queued jobs until none remain (useful for tests/dev)
-  export        write the findings JSON for one or all videos
+  seed-client      create a client + the example checklist
+  create-user      create a user (admin/reviewer/client_viewer)
+  token            mint a JWT for an existing user (dev convenience)
+  import-csv       batch-enqueue ingest jobs from a CSV of S3 URIs
+  worker           run the polling worker (foreground)
+  drain            process queued jobs until none remain (useful for tests/dev)
+  export           write the findings JSON for one or all videos
+  retention-sweep  enqueue purge_frames/archive jobs per client retention policy
 """
 
 from __future__ import annotations
 
 import csv
+import datetime
 import logging
 import uuid
 
 import click
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from evas import worker as worker_module
 from evas.audit import write_audit
+from evas.auth import create_access_token
 from evas.checklists import EXAMPLE_CHECKLIST_ITEMS, EXAMPLE_CHECKLIST_NAME
 from evas.db import session_scope
-from evas.enums import JobType, VideoPriority
+from evas.enums import JobType, UserRole, VideoPriority
 from evas.export import export_to_file
 from evas.jobs import enqueue
-from evas.models import Checklist, Client, Video
+from evas.models import Checklist, Client, Frame, User, Video
 
 
 @click.group()
@@ -66,6 +71,41 @@ def seed_client(name: str, slug: str) -> None:
         )
         click.echo(f"client_id={client.id}")
         click.echo(f"checklist_id={checklist.id}")
+
+
+@cli.command("create-user")
+@click.option("--email", required=True)
+@click.option("--full-name", required=True)
+@click.option("--role", required=True, type=click.Choice([r.value for r in UserRole]))
+@click.option("--client-id", type=click.UUID, default=None, help="Required for client_viewer.")
+def create_user(email: str, full_name: str, role: str, client_id: uuid.UUID | None) -> None:
+    """Create a user. client_viewer must have a --client-id."""
+    user_role = UserRole(role)
+    if user_role == UserRole.client_viewer and client_id is None:
+        raise click.ClickException("client_viewer requires --client-id")
+    with session_scope() as session:
+        user = User(email=email, full_name=full_name, role=user_role, client_id=client_id)
+        session.add(user)
+        session.flush()
+        write_audit(
+            session,
+            entity_type="user",
+            entity_id=user.id,
+            action="created",
+            new_value={"email": email, "role": role},
+        )
+        click.echo(f"user_id={user.id}")
+
+
+@cli.command("token")
+@click.option("--email", required=True)
+def token(email: str) -> None:
+    """Mint a JWT for an existing active user (dev convenience; bypasses bootstrap)."""
+    with session_scope() as session:
+        user = session.scalars(select(User).where(User.email == email)).first()
+        if user is None or not user.is_active:
+            raise click.ClickException("unknown or inactive user")
+        click.echo(create_access_token(user))
 
 
 @cli.command("import-csv")
@@ -132,6 +172,41 @@ def export(video_id: uuid.UUID | None, out_dir: str | None) -> None:
         for vid in ids:
             path = export_to_file(session, vid, out_dir)
             click.echo(f"wrote {path}")
+
+
+@cli.command("retention-sweep")
+def retention_sweep() -> None:
+    """Enqueue purge_frames/archive jobs per each client's retention policy."""
+    now = datetime.datetime.now(datetime.UTC)
+    purge_jobs = archive_jobs = 0
+    with session_scope() as session:
+        clients = session.scalars(select(Client).where(Client.deleted_at.is_(None))).all()
+        for client in clients:
+            videos = session.scalars(
+                select(Video).where(Video.client_id == client.id, Video.deleted_at.is_(None))
+            ).all()
+            for video in videos:
+                age_days = (now - video.uploaded_at).total_seconds() / 86400
+                if (
+                    client.frame_retention_days is not None
+                    and age_days >= client.frame_retention_days
+                ):
+                    unpurged = session.scalar(
+                        select(func.count())
+                        .select_from(Frame)
+                        .where(Frame.video_id == video.id, Frame.purged.is_(False))
+                    )
+                    if unpurged:
+                        enqueue(session, job_type=JobType.purge_frames, video_id=video.id)
+                        purge_jobs += 1
+                if (
+                    client.video_archive_days is not None
+                    and age_days >= client.video_archive_days
+                    and not video.metadata_.get("archived")
+                ):
+                    enqueue(session, job_type=JobType.archive, video_id=video.id)
+                    archive_jobs += 1
+    click.echo(f"enqueued {purge_jobs} purge_frames and {archive_jobs} archive job(s)")
 
 
 if __name__ == "__main__":

@@ -93,6 +93,9 @@ class FakeS3:
     def get_object_bytes(self, uri: str) -> bytes:
         return self.store[uri]
 
+    def delete_object(self, uri: str) -> None:
+        self.store.pop(uri, None)
+
 
 @pytest.fixture
 def fake_s3(monkeypatch: pytest.MonkeyPatch) -> FakeS3:
@@ -102,6 +105,7 @@ def fake_s3(monkeypatch: pytest.MonkeyPatch) -> FakeS3:
     monkeypatch.setattr("evas.pipeline.extract.download_to_file", s3.download_to_file)
     monkeypatch.setattr("evas.pipeline.extract.upload_file", s3.upload_file)
     monkeypatch.setattr("evas.pipeline.review.get_object_bytes", s3.get_object_bytes)
+    monkeypatch.setattr("evas.pipeline.retention.delete_object", s3.delete_object)
     return s3
 
 
@@ -135,6 +139,38 @@ def fake_ai(monkeypatch: pytest.MonkeyPatch) -> None:
     import evas.ai
 
     monkeypatch.setattr(evas.ai, "AiReviewer", lambda *a, **k: FakeReviewer())
+
+
+@pytest.fixture
+def make_user():
+    """Factory creating a user and returning (user_id, bearer_token)."""
+    import uuid as _uuid
+
+    from evas.auth import create_access_token
+    from evas.db import session_scope
+    from evas.enums import UserRole
+    from evas.models import User
+
+    def _make(role: UserRole = UserRole.admin, client_id=None):
+        with session_scope() as s:
+            user = User(
+                email=f"{role.value}-{_uuid.uuid4().hex[:8]}@example.com",
+                full_name="Test User",
+                role=role,
+                client_id=client_id,
+            )
+            s.add(user)
+            s.flush()
+            return user.id, create_access_token(user)
+
+    return _make
+
+
+@pytest.fixture
+def auth_headers(make_user):
+    """Authorization header for a fresh admin user."""
+    _, token = make_user()
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture

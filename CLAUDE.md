@@ -39,6 +39,15 @@ Each step is a row in `processing_jobs`: idempotent, retried up to `max_attempts
 
 **Defer (schema supports them — do not implement yet):** auth, human review UI, webhook delivery, clips.
 
+## Milestone 2 — implemented (see `@Evas2.md`)
+
+- **Auth** — stateless JWT (`evas/auth.py`). The `users` table has **no password column** and the schema is locked, so credentials are not stored: tokens are signed with `EVAS_JWT_SECRET`; `POST /auth/token` is gated by `EVAS_BOOTSTRAP_TOKEN` (interim until an IdP). Roles: `admin`, `reviewer`, `client_viewer` (the latter is tenancy-scoped to its own `client_id`; cross-tenant access → 404).
+- **Human review** — assign/grade/notes, frame-level `override_findings`, QA second pass (`evas/api/human_reviews.py`). Completing a non-QA review moves the video to `human_reviewed` and enqueues a `notify`.
+- **Webhook delivery** — the `notify` job fans out to active endpoints, HMAC-signed (`X-EVAS-Signature`), recorded in `webhook_deliveries`, idempotent on retry (`evas/webhooks.py`). Endpoint mgmt under `/clients/{id}/webhooks` (admin).
+- **Retention/archive** — `purge_frames` (delete S3 images, keep rows, `purged=true`) and `archive` jobs + `evas retention-sweep` (`evas/pipeline/retention.py`).
+
+No new migration: the M1 migration already reproduces the whole schema (all M2 tables exist). Clips remain deferred.
+
 ## Development
 
 - Use the project venv: `.venv/bin/python` (created with `--system-site-packages`). `ruff` is the global install on PATH; `mypy`/`pytest` run via `.venv/bin/python -m …`.

@@ -243,6 +243,50 @@ class AuditLog(Base):
     )
 
 
+class HumanReview(Base):
+    __tablename__ = "human_reviews"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    video_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("videos.id", ondelete="CASCADE"), nullable=False
+    )
+    checklist_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("checklists.id"), nullable=False)
+    reviewer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    is_qa_review: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    qa_of_review: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("human_reviews.id"))
+    status: Mapped[enums.ReviewStatus] = mapped_column(
+        _pg_enum(enums.ReviewStatus, "review_status"),
+        nullable=False,
+        server_default=text("'assigned'"),
+    )
+    grade: Mapped[Decimal | None] = mapped_column(Numeric(4, 2))
+    notes: Mapped[str | None] = mapped_column(Text)
+    assigned_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=_now
+    )
+    reviewed_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+
+
+class HumanFrameNote(Base):
+    __tablename__ = "human_frame_notes"
+    __table_args__ = (UniqueConstraint("human_review_id", "frame_id"),)
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    human_review_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("human_reviews.id", ondelete="CASCADE"), nullable=False
+    )
+    frame_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("frames.id", ondelete="CASCADE"), nullable=False
+    )
+    note: Mapped[str | None] = mapped_column(Text)
+    override_findings: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=_now
+    )
+
+
 class WebhookEndpoint(Base):
     __tablename__ = "webhook_endpoints"
 
@@ -252,6 +296,23 @@ class WebhookEndpoint(Base):
     secret: Mapped[str] = mapped_column(Text, nullable=False)
     events: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=_now
+    )
+
+
+class WebhookDelivery(Base):
+    __tablename__ = "webhook_deliveries"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    endpoint_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("webhook_endpoints.id"), nullable=False
+    )
+    event: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    status_code: Mapped[int | None] = mapped_column(Integer)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    delivered_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     created_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=_now
     )
