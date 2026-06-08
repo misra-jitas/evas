@@ -46,7 +46,18 @@ Each step is a row in `processing_jobs`: idempotent, retried up to `max_attempts
 - **Webhook delivery** — the `notify` job fans out to active endpoints, HMAC-signed (`X-EVAS-Signature`), recorded in `webhook_deliveries`, idempotent on retry (`evas/webhooks.py`). Endpoint mgmt under `/clients/{id}/webhooks` (admin).
 - **Retention/archive** — `purge_frames` (delete S3 images, keep rows, `purged=true`) and `archive` jobs + `evas retention-sweep` (`evas/pipeline/retention.py`).
 
-No new migration: the M1 migration already reproduces the whole schema (all M2 tables exist). Clips remain deferred.
+No new migration: the M1 migration already reproduces the whole schema (all M2 tables exist).
+
+## Milestone 3 — implemented (see `@EVAS_3.md`, UI spec `@EVAS_UI.md`)
+
+- **Clips (temporal review)** — `Clip`/`AiClipFinding` models; manual + auto segmentation (`evas/clips.py`, auto-splits where frame findings change); clip review reuses the `ai_review` job with `payload.target="clip"` and sends a frame *sequence* (`evas/pipeline/review.py`, `prompts/clip_review-*.txt`). Checklist items carry an optional `"scope": "frame"|"clip"`. **One schema addition**: `ai_clip_findings` (migration `0002`, also added to `evas_schema.sql`).
+- **Retention** — `archive` now transitions the source video to S3 **Glacier** (`storage.set_storage_class`, recorded in `videos.metadata`); `evas retention-sweep --dry-run`; nightly cron documented in `docs/ops.md`.
+- **Billing** — `evas/billing.py` + `GET /clients/{id}/billing?period=YYYY-MM&format=json|csv|pdf`. Token/cost come straight from `ai_runs` (reconciliation test). Needs `fpdf2`.
+- **Prompt A/B** — `evas/ab.py` + `/ab-tests` (admin): run two `prompt_version`s (separate `ai_runs` via `payload.prompt_version`), compare grades/cost/disagreements vs human ground truth, recommend one.
+- **Client portal** — `/portal/*` (read-only, tenancy-isolated): final finding = human override else AI; strips cost/reviewer/model/confidence.
+- **Ops** — `GET /admin/metrics` (dead jobs, queue depth, webhook failures, cost spikes); `scripts/backup.sh`/`restore.sh`; SQS-threshold + runbook in `docs/ops.md`.
+
+**Defer (UI build is follow-up):** the React reviewer/ops/portal frontends in `EVAS_UI.md` are not built yet — backend only this milestone. `EVAS_AI_STUB=true` runs reviews offline (frame + clip).
 
 ## Development
 

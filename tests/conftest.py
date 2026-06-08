@@ -79,6 +79,7 @@ class FakeS3:
 
     def __init__(self) -> None:
         self.store: dict[str, bytes] = {}
+        self.storage_classes: dict[str, str] = {}
 
     def put(self, uri: str, data: bytes) -> None:
         self.store[uri] = data
@@ -100,6 +101,9 @@ class FakeS3:
     def delete_object(self, uri: str) -> None:
         self.store.pop(uri, None)
 
+    def set_storage_class(self, uri: str, storage_class: str) -> None:
+        self.storage_classes[uri] = storage_class
+
 
 @pytest.fixture
 def fake_s3(monkeypatch: pytest.MonkeyPatch) -> FakeS3:
@@ -110,6 +114,7 @@ def fake_s3(monkeypatch: pytest.MonkeyPatch) -> FakeS3:
     monkeypatch.setattr("evas.pipeline.extract.upload_file", s3.upload_file)
     monkeypatch.setattr("evas.pipeline.review.get_object_bytes", s3.get_object_bytes)
     monkeypatch.setattr("evas.pipeline.retention.delete_object", s3.delete_object)
+    monkeypatch.setattr("evas.pipeline.retention.set_storage_class", s3.set_storage_class)
     return s3
 
 
@@ -117,9 +122,11 @@ class FakeReviewer:
     """Deterministic stand-in for the Anthropic vision reviewer."""
 
     model = "claude-haiku-4-5-fake"
-    prompt_version = "1.0.0"
 
-    def review_frame(self, image_bytes: bytes, items, media_type: str = "image/jpeg"):
+    def __init__(self, prompt_version: str = "1.0.0") -> None:
+        self.prompt_version = prompt_version
+
+    def _result(self, items):
         from evas.ai import FrameReview
 
         findings = {}
@@ -130,19 +137,27 @@ class FakeReviewer:
                 "confidence": 0.5 if item["key"] == "holding_broom" else 0.95,
             }
         return FrameReview(
-            description="fake frame",
+            description="fake review",
             findings=findings,
             tokens_in=100,
             tokens_out=20,
             cost_usd=0.0001,
         )
 
+    def review_frame(self, image_bytes: bytes, items, media_type: str = "image/jpeg"):
+        return self._result(items)
+
+    def review_clip(self, images, items, media_type: str = "image/jpeg"):
+        return self._result(items)
+
 
 @pytest.fixture
 def fake_ai(monkeypatch: pytest.MonkeyPatch) -> None:
     import evas.ai
 
-    monkeypatch.setattr(evas.ai, "AiReviewer", lambda *a, **k: FakeReviewer())
+    monkeypatch.setattr(
+        evas.ai, "AiReviewer", lambda *a, **k: FakeReviewer(k.get("prompt_version", "1.0.0"))
+    )
 
 
 @pytest.fixture

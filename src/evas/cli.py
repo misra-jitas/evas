@@ -185,8 +185,13 @@ def export(video_id: uuid.UUID | None, out_dir: str | None) -> None:
 
 
 @cli.command("retention-sweep")
-def retention_sweep() -> None:
-    """Enqueue purge_frames/archive jobs per each client's retention policy."""
+@click.option("--dry-run", is_flag=True, help="Report what would be enqueued without queuing.")
+def retention_sweep(dry_run: bool) -> None:
+    """Enqueue purge_frames/archive jobs per each client's retention policy.
+
+    Intended to run nightly via cron, e.g.:
+        0 3 * * *  cd /srv/evas && .venv/bin/python -m evas.cli retention-sweep
+    """
     now = datetime.datetime.now(datetime.UTC)
     purge_jobs = archive_jobs = 0
     with session_scope() as session:
@@ -207,16 +212,21 @@ def retention_sweep() -> None:
                         .where(Frame.video_id == video.id, Frame.purged.is_(False))
                     )
                     if unpurged:
-                        enqueue(session, job_type=JobType.purge_frames, video_id=video.id)
+                        if not dry_run:
+                            enqueue(session, job_type=JobType.purge_frames, video_id=video.id)
                         purge_jobs += 1
                 if (
                     client.video_archive_days is not None
                     and age_days >= client.video_archive_days
                     and not video.metadata_.get("archived")
                 ):
-                    enqueue(session, job_type=JobType.archive, video_id=video.id)
+                    if not dry_run:
+                        enqueue(session, job_type=JobType.archive, video_id=video.id)
                     archive_jobs += 1
-    click.echo(f"enqueued {purge_jobs} purge_frames and {archive_jobs} archive job(s)")
+        if dry_run:
+            session.rollback()
+    prefix = "[dry-run] would enqueue" if dry_run else "enqueued"
+    click.echo(f"{prefix} {purge_jobs} purge_frames and {archive_jobs} archive job(s)")
 
 
 @cli.command("create-buckets")

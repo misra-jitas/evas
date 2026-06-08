@@ -140,6 +140,21 @@ CREATE TABLE ai_frame_findings (
 CREATE INDEX idx_aff_run ON ai_frame_findings (ai_run_id);
 CREATE INDEX idx_aff_flagged ON ai_frame_findings (ai_run_id) WHERE flagged;
 
+-- Milestone 3: clip-level (temporal) findings, mirroring ai_frame_findings.
+CREATE TABLE ai_clip_findings (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    ai_run_id    uuid NOT NULL REFERENCES ai_runs(id) ON DELETE CASCADE,
+    clip_id      uuid NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+    description  text,
+    -- findings mirror clip-scoped checklist item keys: {"is_sweeping": {"value": true, "confidence": 0.9}, ...}
+    findings     jsonb NOT NULL,
+    confidence   numeric(4,3),              -- min/avg confidence across items, for flagging
+    flagged      boolean NOT NULL DEFAULT false,  -- below threshold → human attention
+    UNIQUE (ai_run_id, clip_id)
+);
+CREATE INDEX idx_acf_run ON ai_clip_findings (ai_run_id);
+CREATE INDEX idx_acf_flagged ON ai_clip_findings (ai_run_id) WHERE flagged;
+
 -- ---------- HUMAN REVIEWS ----------
 CREATE TABLE human_reviews (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),

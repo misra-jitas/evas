@@ -1,10 +1,13 @@
 """Checklist definitions and video-grade computation.
 
 A checklist's `items` is a list of:
-    {"key": str, "label": str, "type": "boolean", "weight": float}
+    {"key": str, "label": str, "type": "boolean", "weight": float,
+     "scope": "frame" | "clip"}   # scope optional, defaults to "frame"
 
 Per-frame AI findings mirror the item keys:
     {"two_hands": {"value": true, "confidence": 0.97}, ...}
+
+Clip-scoped items are only evaluated on clips (temporal review, M3).
 """
 
 from __future__ import annotations
@@ -15,13 +18,34 @@ from typing import Any
 from evas.enums import GradingMode
 
 # Milestone-1 example checklist (workstation safety/compliance).
+# Frame-scoped items are evaluated per still frame; clip-scoped items (M3) ask
+# action-level questions over a frame sequence.
 EXAMPLE_CHECKLIST_NAME = "workstation_v1"
 EXAMPLE_CHECKLIST_ITEMS: list[dict[str, Any]] = [
     {"key": "two_hands", "label": "Two hands visible", "type": "boolean", "weight": 1.0},
     {"key": "holding_tool", "label": "Hand holding a tool", "type": "boolean", "weight": 2.0},
     {"key": "at_workstation", "label": "Person at workstation", "type": "boolean", "weight": 1.0},
     {"key": "holding_broom", "label": "Holding a broom", "type": "boolean", "weight": 1.0},
+    {
+        "key": "is_sweeping",
+        "label": "Person is actively sweeping",
+        "type": "boolean",
+        "weight": 1.0,
+        "scope": "clip",
+    },
 ]
+
+
+def item_scope(item: dict[str, Any]) -> str:
+    return str(item.get("scope", "frame"))
+
+
+def frame_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [it for it in items if item_scope(it) == "frame"]
+
+
+def clip_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [it for it in items if item_scope(it) == "clip"]
 
 
 def item_keys(items: list[dict[str, Any]]) -> list[str]:

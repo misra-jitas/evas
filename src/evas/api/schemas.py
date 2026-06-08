@@ -124,6 +124,32 @@ class FrameNoteUpsert(BaseModel):
     override_findings: dict[str, Any] | None = None
 
 
+# ---- Prompt A/B ----
+class AbRequest(BaseModel):
+    video_ids: list[uuid.UUID]
+    prompt_version_a: str
+    prompt_version_b: str
+
+
+# ---- Clips (temporal review) ----
+class ClipCreate(BaseModel):
+    start_seconds: float = Field(..., ge=0)
+    end_seconds: float = Field(..., ge=0)
+    label: str | None = None
+
+
+class ClipOut(BaseModel):
+    id: uuid.UUID
+    video_id: uuid.UUID
+    start_seconds: float
+    end_seconds: float
+    label: str | None
+    description: str | None = None
+    findings: dict[str, Any] | None = None
+    confidence: float | None = None
+    flagged: bool | None = None
+
+
 # ---- Webhooks ----
 class WebhookCreate(BaseModel):
     url: str

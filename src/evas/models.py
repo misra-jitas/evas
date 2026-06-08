@@ -316,3 +316,35 @@ class WebhookDelivery(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=_now
     )
+
+
+class Clip(Base):
+    __tablename__ = "clips"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    video_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("videos.id", ondelete="CASCADE"), nullable=False
+    )
+    start_seconds: Mapped[Decimal] = mapped_column(Numeric(10, 3), nullable=False)
+    end_seconds: Mapped[Decimal] = mapped_column(Numeric(10, 3), nullable=False)
+    label: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=_now
+    )
+
+
+class AiClipFinding(Base):
+    __tablename__ = "ai_clip_findings"
+    __table_args__ = (UniqueConstraint("ai_run_id", "clip_id"),)
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    ai_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("ai_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    clip_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("clips.id", ondelete="CASCADE"), nullable=False
+    )
+    description: Mapped[str | None] = mapped_column(Text)
+    findings: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric(4, 3))
+    flagged: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))

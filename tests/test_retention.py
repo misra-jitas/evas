@@ -79,6 +79,8 @@ def test_archive_marks_metadata(fake_s3) -> None:
         v = s.get(Video, video_id)
         assert v.metadata_.get("archived") is True
         assert "archived_at" in v.metadata_
+        assert v.metadata_.get("storage_class") == "GLACIER"
+        assert v.metadata_.get("storage_class_applied") is True  # fake S3 honors it
         assert s.scalars(select(AuditLog).where(AuditLog.action == "archived")).all()
 
 

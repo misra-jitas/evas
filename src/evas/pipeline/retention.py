@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from evas.audit import write_audit
 from evas.models import Frame, ProcessingJob, Video
-from evas.storage import delete_object
+from evas.storage import delete_object, set_storage_class
 
 
 def _utcnow() -> datetime.datetime:
@@ -52,15 +52,27 @@ def handle_archive(session: Session, job: ProcessingJob) -> None:
         raise ValueError(f"video {job.video_id} not found")
     if video.metadata_.get("archived"):
         return  # idempotent
+    storage_class = "GLACIER"
+    transitioned = True
+    try:
+        set_storage_class(video.source_uri, storage_class)
+    except Exception:  # noqa: BLE001 - backend may not support the class (e.g. MinIO)
+        transitioned = False
     video.metadata_ = {
         **video.metadata_,
         "archived": True,
         "archived_at": _utcnow().isoformat(),
+        "storage_class": storage_class,
+        "storage_class_applied": transitioned,
     }
     write_audit(
         session,
         entity_type="video",
         entity_id=video.id,
         action="archived",
-        new_value={"source_uri": video.source_uri},
+        new_value={
+            "source_uri": video.source_uri,
+            "storage_class": storage_class,
+            "applied": transitioned,
+        },
     )

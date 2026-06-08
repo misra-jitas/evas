@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import boto3
 
@@ -61,3 +61,20 @@ def get_object_bytes(uri: str) -> bytes:
 def delete_object(uri: str) -> None:
     bucket, key = parse_s3_uri(uri)
     get_s3_client().delete_object(Bucket=bucket, Key=key)
+
+
+def set_storage_class(uri: str, storage_class: str) -> None:
+    """Transition an object to a different S3 storage class (e.g. GLACIER).
+
+    Implemented as an in-place server-side copy. Not all S3-compatible backends
+    (e.g. MinIO) honor every storage class; callers should record intent
+    regardless of backend support.
+    """
+    bucket, key = parse_s3_uri(uri)
+    get_s3_client().copy_object(
+        Bucket=bucket,
+        Key=key,
+        CopySource={"Bucket": bucket, "Key": key},
+        StorageClass=cast(Any, storage_class),
+        MetadataDirective="COPY",
+    )
