@@ -1,0 +1,197 @@
+/* ============================================================
+   EVAS — instrument-panel design system
+   Utilitarian / data-dense. Light + dark via [data-theme].
+   ============================================================ */
+
+:root,
+[data-theme="light"] {
+  --bg:        oklch(0.975 0.002 260);
+  --bg-grid:   oklch(0.93 0.004 260);
+  --panel:     oklch(1 0 0);
+  --panel-2:   oklch(0.984 0.002 260);
+  --panel-3:   oklch(0.965 0.003 260);
+  --ink:       oklch(0.20 0.012 265);
+  --ink-2:     oklch(0.45 0.012 265);
+  --ink-3:     oklch(0.60 0.010 265);
+  --ink-4:     oklch(0.72 0.008 265);
+  --line:      oklch(0.905 0.004 265);
+  --line-2:    oklch(0.945 0.003 265);
+  --line-strong: oklch(0.84 0.006 265);
+
+  --accent:    oklch(0.52 0.17 252);
+  --accent-2:  oklch(0.52 0.17 252 / 0.10);
+  --accent-ink: oklch(0.99 0 0);
+
+  --amber:     oklch(0.70 0.15 67);
+  --amber-bg:  oklch(0.70 0.15 67 / 0.13);
+  --red:       oklch(0.55 0.21 27);
+  --red-bg:    oklch(0.55 0.21 27 / 0.11);
+  --green:     oklch(0.56 0.13 150);
+  --green-bg:  oklch(0.56 0.13 150 / 0.12);
+  --violet:    oklch(0.52 0.18 295);
+
+  --shadow-1: 0 1px 2px oklch(0.2 0.02 265 / 0.06), 0 1px 1px oklch(0.2 0.02 265 / 0.04);
+  --shadow-2: 0 4px 16px oklch(0.2 0.02 265 / 0.10), 0 1px 3px oklch(0.2 0.02 265 / 0.06);
+  --shadow-pop: 0 12px 40px oklch(0.2 0.02 265 / 0.18), 0 2px 8px oklch(0.2 0.02 265 / 0.10);
+}
+
+[data-theme="dark"] {
+  --bg:        oklch(0.165 0.006 265);
+  --bg-grid:   oklch(0.225 0.008 265);
+  --panel:     oklch(0.198 0.007 265);
+  --panel-2:   oklch(0.225 0.008 265);
+  --panel-3:   oklch(0.255 0.009 265);
+  --ink:       oklch(0.95 0.004 260);
+  --ink-2:     oklch(0.74 0.008 260);
+  --ink-3:     oklch(0.60 0.009 262);
+  --ink-4:     oklch(0.50 0.009 262);
+  --line:      oklch(0.295 0.010 265);
+  --line-2:    oklch(0.255 0.009 265);
+  --line-strong: oklch(0.38 0.012 265);
+
+  --accent:    oklch(0.70 0.15 252);
+  --accent-2:  oklch(0.70 0.15 252 / 0.16);
+  --accent-ink: oklch(0.15 0.02 265);
+
+  --amber:     oklch(0.80 0.14 72);
+  --amber-bg:  oklch(0.80 0.14 72 / 0.16);
+  --red:       oklch(0.66 0.19 27);
+  --red-bg:    oklch(0.66 0.19 27 / 0.16);
+  --green:     oklch(0.72 0.14 152);
+  --green-bg:  oklch(0.72 0.14 152 / 0.15);
+  --violet:    oklch(0.72 0.16 295);
+
+  --shadow-1: 0 1px 2px oklch(0 0 0 / 0.4);
+  --shadow-2: 0 6px 20px oklch(0 0 0 / 0.45), 0 1px 3px oklch(0 0 0 / 0.4);
+  --shadow-pop: 0 16px 48px oklch(0 0 0 / 0.6), 0 2px 10px oklch(0 0 0 / 0.5);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#root { height: 100vh; }
+
+/* ---- Type helpers ---- */
+.mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-feature-settings: "tnum" 1; }
+.tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+.label {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+h1,h2,h3,h4 { margin: 0; font-weight: 600; }
+
+/* ---- Scrollbars ---- */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 10px;
+  border: 3px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--ink-4); }
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+
+/* ---- Focus ---- */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
+/* ---- Reusable atoms ---- */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+button { font-family: inherit; cursor: pointer; }
+input, textarea, select { font-family: inherit; color: inherit; }
+
+input::placeholder, textarea::placeholder { color: var(--ink-4); }
+
+/* selection */
+::selection { background: var(--accent-2); color: var(--ink); }
+
+/* kbd */
+kbd {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 5px 4px;
+  border-radius: 3px;
+  background: var(--panel-3);
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  color: var(--ink-2);
+  min-width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* grid texture for empty surfaces */
+.grid-tex {
+  background-image:
+    linear-gradient(var(--bg-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/* fade-in util — transform-only so content stays visible even if the
+   animation is paused (e.g. during off-screen capture) */
+@keyframes evas-fade { from { transform: translateY(5px); } to { transform: none; } }
+.fade-in { animation: evas-fade 0.3s cubic-bezier(0.2,0.6,0.2,1) both; }
+
+@keyframes evas-pop { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
+
+@keyframes evas-shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.skel {
+  background: linear-gradient(90deg, var(--panel-2) 25%, var(--panel-3) 50%, var(--panel-2) 75%);
+  background-size: 800px 100%;
+  animation: evas-shimmer 1.3s linear infinite;
+  border-radius: 3px;
+}
+
+@keyframes evas-blink { 0%,49%{opacity:1} 50%,100%{opacity:0.25} }
+.rec-dot { animation: evas-blink 1.1s steps(1) infinite; }
+
+@keyframes evas-spin { to { transform: rotate(360deg); } }
+
+/* confirm sweep — a calm checkmark wash on submit→next */
+@keyframes evas-sweep {
+  0% { transform: scale(0.6); opacity: 0; }
+  35% { transform: scale(1); opacity: 1; }
+  70% { opacity: 1; }
+  100% { transform: scale(1.04); opacity: 0; }
+}
+
+/* progress fill grows from left, gentle */
+@keyframes evas-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-in, .skel, .rec-dot { animation: none !important; }
+}

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from evas import __version__
 from evas.api.ab_routes import router as ab_router
@@ -35,6 +38,12 @@ def create_app() -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
+
+    # Serve the built web UI at /app when present (frontend/dist). Optional: the
+    # API runs fine without it, and in dev the Vite server proxies /api here.
+    dist = Path(__file__).resolve().parents[3] / "frontend" / "dist"
+    if dist.is_dir():
+        app.mount("/app", StaticFiles(directory=dist, html=True), name="webui")
 
     return app
 

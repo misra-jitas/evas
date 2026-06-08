@@ -65,6 +65,15 @@ No new migration: the M1 migration already reproduces the whole schema (all M2 t
 - **AI Monitor** — admin observability over existing tables (no new data): `GET /ai/runs` (filterable run log + frames done/total, flagged, tokens, cost, duration), `GET /ai/runs/{id}` (per-frame findings, issues, cost/frame, AI-vs-human grade gap), `GET /ai/stats` (throughput/cost/confidence/flagged/error rates grouped by model & prompt_version). `POST /ai/runs/{id}/rerun` enqueues a fresh `ai_review` (new run, history preserved).
 - **Schema addition** — migration `0003` adds `sources`, `videos.source_id`, the `sync_source` `job_type` value (via `autocommit_block()` — `ALTER TYPE … ADD VALUE` can't run in a txn / be used in the same txn), and appends `source_id` to the `video_review_board` view. Mirrored into `evas_schema.sql` (enum value inline there for fresh installs).
 
+## Web UI — implemented (`frontend/`, see `@frontend/README.md`)
+
+Vite + React + TypeScript port of the Claude Design prototype (the "instrument-panel" system: IBM Plex Sans/Mono, hairline grid, one cobalt accent, colorblind-safe status, light/dark, EN/ES). Five surfaces in one app, role-routed at login: **Reviewer Workbench** (Queue + keyboard-first Review with derived grade, undo, autosave, instant submit→next, fading hints), **Ops Dashboard** (pipeline/discrepancy/throughput/cost + Videos + Jobs), **Sources**, **AI Review** (observability), **Client Portal**. Inline styles + `src/theme.css` drive the look (pixel-faithful to the mock); no Tailwind.
+
+- **Data**: screens call the live API and fall back to bundled mock fixtures (`src/data.ts`) when the backend is unreachable/empty, so the UI always renders. Wired live: `GET /sources` + `POST /sources/{id}/sync`, `GET /ai/runs` + `POST /ai/runs/{id}/rerun`, `GET /admin/metrics` (dashboard pipeline), `GET /portal/videos`. Gaps that stay mock (no clean endpoint yet): reviewer Queue/Review frame-level model + human-review writes, dashboard discrepancy/throughput/cost, Jobs list, run drill-down frames.
+- **Auth**: role-based login; with `VITE_EVAS_BOOTSTRAP_TOKEN` set it mints a real JWT via `POST /auth/token` and sends `Authorization: Bearer`.
+- **Dev**: `cd frontend && npm install && npm run dev` (proxies `/api`→`:8000`). **Build**: `npm run build` → `frontend/dist/`, which FastAPI auto-mounts at `/app` when present. Verify: `npm run typecheck`.
+- The original design bundle's i18n had Spanish merged into the `en` map (a dropped brace); the port splits `en`/`es` correctly so the toggle works.
+
 ## Development
 
 - Use the project venv: `.venv/bin/python` (created with `--system-site-packages`). `ruff` is the global install on PATH; `mypy`/`pytest` run via `.venv/bin/python -m …`.

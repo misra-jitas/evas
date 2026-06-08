@@ -1,5 +1,14 @@
 # EVAS Operations
 
+## Web UI
+
+The React UI lives in `frontend/` (Vite + TypeScript). Build it with
+`cd frontend && npm install && npm run build`; that emits `frontend/dist/`, which
+the FastAPI app auto-mounts at **`/app`** when the directory exists (no-op
+otherwise). Build it as part of the deploy/image step so `/app` is served from the
+same origin as the API. The dev server (`npm run dev`, port 5173) proxies `/api`
+to the backend, so local work needs no CORS config.
+
 ## Job queue: polling vs SQS
 
 The worker polls `processing_jobs` with `FOR UPDATE SKIP LOCKED`. This is
