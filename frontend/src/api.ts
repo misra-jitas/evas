@@ -188,9 +188,43 @@ function adaptPortalVideo(r: RawPortalVideo): PortalVideo {
   };
 }
 
+export interface ClientRecord {
+  id: string;
+  name: string;
+  slug: string;
+  sampling_config: Record<string, unknown>;
+  frame_retention_days: number | null;
+  video_archive_days: number | null;
+  video_count: number;
+}
+export interface ClientInput {
+  name: string;
+  slug: string;
+  sampling_config?: Record<string, unknown>;
+  frame_retention_days?: number | null;
+  video_archive_days?: number | null;
+}
+
+function jsonInit(method: string, body: unknown): RequestInit {
+  return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+}
+
 // ---- typed endpoint calls ----
 export const api = {
+  listClients: () => request<ClientRecord[]>("/clients"),
+  createClient: (body: ClientInput) => request<ClientRecord>("/clients", jsonInit("POST", body)),
+  updateClient: (id: string, body: Partial<ClientInput>) =>
+    request<ClientRecord>(`/clients/${id}`, jsonInit("PATCH", body)),
+  deleteClient: (id: string) => request(`/clients/${id}`, { method: "DELETE" }),
   listSources: () => request<RawSource[]>("/sources").then((rows) => rows.map(adaptSource)),
+  createSource: (body: {
+    client_id: string;
+    label: string;
+    type: "s3" | "url";
+    uri_prefix: string;
+    credential_ref?: string | null;
+    auto_sync?: boolean;
+  }) => request<RawSource>("/sources", jsonInit("POST", body)).then(adaptSource),
   syncSource: (id: string) => request(`/sources/${id}/sync`, { method: "POST" }),
   listRuns: (qs = "") => request<RawRun[]>(`/ai/runs${qs}`).then((rows) => rows.map(adaptRun)),
   runStats: () => request<unknown>("/ai/stats"),

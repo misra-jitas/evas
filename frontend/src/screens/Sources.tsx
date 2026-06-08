@@ -23,6 +23,7 @@ import {
   Toggle,
 } from "../components";
 import { D, sceneOf } from "../data";
+import type { SelectOption } from "../components";
 import type { Source, TFn } from "../types";
 
 function ago(m: number): string {
@@ -49,6 +50,11 @@ export function SourcesScreen({
   const [sources, setSources] = useState<Source[]>(live.data);
   const [showReg, setShowReg] = useState(false);
   const [syncing, setSyncing] = useState<Record<string, boolean>>({});
+  // Live clients for the register modal's picker (falls back to mock clients).
+  const clientsLive = useLive<SelectOption[]>(
+    () => api.listClients().then((rows) => rows.map((c) => ({ v: c.id, l: c.name }))),
+    D.CLIENTS.map((c) => ({ v: c.id, l: c.name })),
+  );
 
   useEffect(() => setSources(live.data), [live.data]);
 
@@ -85,15 +91,22 @@ export function SourcesScreen({
     };
     setSources((prev) => [ns, ...prev]);
     setShowReg(false);
-    let n = 0;
-    const iv = setInterval(() => {
-      n += Math.floor(8 + Math.random() * 22);
-      setSources((prev) => prev.map((x) => (x.id === ns.id ? { ...x, total: n, toGo: n } : x)));
-      if (n > 80) {
-        clearInterval(iv);
-        setSources((prev) => prev.map((x) => (x.id === ns.id ? { ...x, status: "connected" } : x)));
-      }
-    }, 500);
+    // Persist for real (creates the source + kicks off a sync), then reconcile.
+    api
+      .createSource({ client_id: form.client, label: form.label, type: form.type, uri_prefix: form.uri, credential_ref: form.cred, auto_sync: form.autoSync })
+      .then(() => setTimeout(() => live.reload(), 1800))
+      .catch(() => {
+        // Offline/mock: keep the optimistic row and fake discovery.
+        let n = 0;
+        const iv = setInterval(() => {
+          n += Math.floor(8 + Math.random() * 22);
+          setSources((prev) => prev.map((x) => (x.id === ns.id ? { ...x, total: n, toGo: n } : x)));
+          if (n > 80) {
+            clearInterval(iv);
+            setSources((prev) => prev.map((x) => (x.id === ns.id ? { ...x, status: "connected" } : x)));
+          }
+        }, 500);
+      });
   }
 
   if (sub === "detail" && sourceId) {
@@ -187,16 +200,16 @@ export function SourcesScreen({
           </div>
         )}
       </div>
-      {showReg && <RegisterModal t={t} onClose={() => setShowReg(false)} onSubmit={register} />}
+      {showReg && <RegisterModal t={t} clientOptions={clientsLive.data} onClose={() => setShowReg(false)} onSubmit={register} />}
     </div>
   );
 }
 
-function RegisterModal({ t, onClose, onSubmit }: { t: TFn; onClose: () => void; onSubmit: (f: { type: "s3" | "url"; uri: string; label: string; client: string; cred: string; autoSync: boolean }) => void }) {
+function RegisterModal({ t, clientOptions, onClose, onSubmit }: { t: TFn; clientOptions: SelectOption[]; onClose: () => void; onSubmit: (f: { type: "s3" | "url"; uri: string; label: string; client: string; cred: string; autoSync: boolean }) => void }) {
   const [type, setType] = useState<"s3" | "url">("s3");
   const [uri, setUri] = useState("");
   const [label, setLabel] = useState("");
-  const [client, setClient] = useState(D.CLIENTS[0].id);
+  const [client, setClient] = useState(clientOptions[0]?.v || "");
   const [cred, setCred] = useState(D.CREDENTIALS[0]);
   const [autoSync, setAutoSync] = useState(true);
   const [showSampling, setShowSampling] = useState(false);
@@ -226,7 +239,7 @@ function RegisterModal({ t, onClose, onSubmit }: { t: TFn; onClose: () => void; 
         </Field>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <Field label={t("src.client")}>
-            <Select value={client} onChange={setClient} options={D.CLIENTS.map((c) => ({ v: c.id, l: c.name }))} full />
+            <Select value={client} onChange={setClient} options={clientOptions} full />
           </Field>
           <Field label={t("src.cred")}>
             <Select value={cred} onChange={setCred} options={D.CREDENTIALS.map((c) => ({ v: c, l: c }))} full />

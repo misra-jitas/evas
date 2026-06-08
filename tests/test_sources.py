@@ -136,6 +136,29 @@ def test_rescan_is_idempotent(auth_headers, fake_s3, fake_ai, tmp_path) -> None:
         )
 
 
+def test_scan_links_already_ingested_videos(auth_headers, fake_s3) -> None:
+    # A video already exists (e.g. ingested via demo/CSV) with no source link.
+    client_id = _seed_client()
+    uri = "s3://evas-videos/acme/pre-existing.mp4"
+    fake_s3.put(uri, b"fake-mp4-bytes")
+    with session_scope() as s:
+        v = Video(client_id=client_id, source_uri=uri, file_hash=uuid.uuid4().hex)
+        s.add(v)
+        s.flush()
+        video_id = v.id
+
+    src = _register(client_id, auth_headers)  # prefix s3://evas-videos/acme/
+    while worker.run_once():
+        pass
+
+    detail = client.get(f"/sources/{src['id']}", headers=auth_headers).json()
+    assert detail["last_sync_result"]["linked"] == 1
+    assert detail["last_sync_result"]["registered"] == 0  # not re-ingested
+    with session_scope() as s:
+        assert s.get(Video, video_id).source_id == uuid.UUID(src["id"])
+    assert detail["funnel"]["total"] == 1  # now visible under the source
+
+
 def test_url_source_is_not_yet_supported(auth_headers, fake_s3) -> None:
     client_id = _seed_client()
     src = _register(client_id, auth_headers, type="url", uri_prefix="https://example.com/listing")

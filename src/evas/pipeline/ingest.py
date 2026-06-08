@@ -55,6 +55,11 @@ def handle_ingest(session: Session, job: ProcessingJob) -> None:
         ).first()
         if existing is not None:
             job.video_id = existing.id
+            # Backfill the source link if this ingest came from a source scan and
+            # the existing video isn't linked yet (keeps source funnels accurate).
+            source_ref = payload.get("source_id")
+            if source_ref and existing.source_id is None:
+                existing.source_id = uuid.UUID(str(source_ref))
             write_audit(
                 session,
                 entity_type="video",

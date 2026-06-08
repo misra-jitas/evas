@@ -68,24 +68,37 @@ def handle_sync_source(session: Session, job: ProcessingJob) -> None:
         session.commit()
         raise RuntimeError(msg)
 
-    discovered = registered = skipped = failed = 0
+    discovered = registered = linked = skipped = failed = 0
     errors: list[str] = []
 
-    # Already-registered source URIs for this client (idempotent re-scan).
-    known = set(
-        session.scalars(
-            select(Video.source_uri).where(
-                Video.client_id == source.client_id, Video.deleted_at.is_(None)
-            )
+    # Existing videos for this client, keyed by source_uri. A video may already
+    # exist (ingested via demo, CSV, another source, or a prior sync) — we link
+    # it to this source rather than silently skipping, so it shows in the funnel.
+    existing_videos = {
+        v.source_uri: v
+        for v in session.scalars(
+            select(Video).where(Video.client_id == source.client_id, Video.deleted_at.is_(None))
         ).all()
-    )
+    }
 
     for uri in list_objects(source.uri_prefix):
         if not _is_video(uri):
             continue
         discovered += 1
-        if uri in known:
-            skipped += 1
+        existing = existing_videos.get(uri)
+        if existing is not None:
+            if existing.source_id is None:
+                existing.source_id = source.id
+                write_audit(
+                    session,
+                    entity_type="video",
+                    entity_id=existing.id,
+                    action="source_linked",
+                    new_value={"source_id": str(source.id)},
+                )
+                linked += 1
+            else:
+                skipped += 1
             continue
         try:
             enqueue(
@@ -99,7 +112,6 @@ def handle_sync_source(session: Session, job: ProcessingJob) -> None:
                     "priority": VideoPriority.normal.value,
                 },
             )
-            known.add(uri)
             registered += 1
         except Exception as exc:  # noqa: BLE001 - one bad object must not abort the scan
             failed += 1
@@ -109,6 +121,7 @@ def handle_sync_source(session: Session, job: ProcessingJob) -> None:
     source.last_sync_result = {
         "discovered": discovered,
         "registered": registered,
+        "linked": linked,
         "skipped": skipped,
         "failed": failed,
         "at": source.last_synced_at.isoformat(),

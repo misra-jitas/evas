@@ -167,6 +167,34 @@ class WebhookOut(BaseModel):
     created_at: datetime.datetime
 
 
+# ---- Clients ----
+class ClientCreate(BaseModel):
+    name: str
+    slug: str
+    sampling_config: dict[str, Any] | None = None
+    frame_retention_days: int | None = None
+    video_archive_days: int | None = None
+
+
+class ClientUpdate(BaseModel):
+    name: str | None = None
+    slug: str | None = None
+    sampling_config: dict[str, Any] | None = None
+    frame_retention_days: int | None = None
+    video_archive_days: int | None = None
+
+
+class ClientOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    slug: str
+    sampling_config: dict[str, Any]
+    frame_retention_days: int | None
+    video_archive_days: int | None
+    created_at: datetime.datetime
+    video_count: int
+
+
 # ---- Sources ----
 class SourceCreate(BaseModel):
     client_id: uuid.UUID

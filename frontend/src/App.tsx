@@ -6,6 +6,7 @@ import { Btn, ClientChip, Ico, Modal, Segment, Stat } from "./components";
 import { D } from "./data";
 import { makeT } from "./i18n";
 import { AIReviewScreen } from "./screens/AiReview";
+import { ClientsScreen } from "./screens/Clients";
 import { DashboardScreen } from "./screens/Dashboard";
 import { PortalScreen } from "./screens/Portal";
 import { QueueScreen, type SessionState } from "./screens/Queue";
@@ -81,6 +82,7 @@ function TopBar({ t, role, route, setRoute, theme, setTheme, lang, setLang, onSi
     reviewer: [{ k: "queue", icon: "list", l: t("nav.queue") }],
     admin: [
       { k: "sources", icon: "database", l: t("nav.sources") },
+      { k: "clients", icon: "user", l: t("nav.clients") },
       { k: "dashboard", icon: "grid", l: t("nav.dashboard") },
       { k: "videos", icon: "film", l: t("nav.videos") },
       { k: "aireview", icon: "cpu", l: t("nav.aireview") },
@@ -289,6 +291,8 @@ export function App() {
       body = <SourcesScreen t={t} sub={route.screen === "detail" ? "detail" : "list"} sourceId={route.id} onOpen={(screen, id) => setRoute({ screen: screen === "sources" ? "sources" : "detail", id })} onOpenReview={(id) => setRoute({ screen: "review", id })} />;
     } else if (route.screen === "aireview" || route.screen === "run") {
       body = <AIReviewScreen t={t} sub={route.screen === "run" ? "run" : "list"} runId={route.id} onOpen={(screen, id) => setRoute({ screen: screen === "aireview" ? "aireview" : "run", id })} onOpenDiscrepancy={() => setRoute({ screen: "dashboard" })} />;
+    } else if (route.screen === "clients") {
+      body = <ClientsScreen t={t} />;
     } else {
       body = <DashboardScreen t={t} sub={route.screen === "dashboard" ? null : route.screen} onOpenReview={(id) => setRoute({ screen: "review", id })} />;
     }
