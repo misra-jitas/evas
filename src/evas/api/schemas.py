@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from evas.enums import ReviewStatus, VideoPriority
+from evas.enums import ReviewStatus, SourceType, VideoPriority
 
 
 class VideoCreateRequest(BaseModel):
@@ -38,6 +38,7 @@ class ReviewBoardRow(BaseModel):
     reviewer_id: uuid.UUID | None
     grade_discrepancy: float | None
     uploaded_at: datetime.datetime
+    source_id: uuid.UUID | None = None
 
 
 class FrameFindingOut(BaseModel):
@@ -164,3 +165,53 @@ class WebhookOut(BaseModel):
     events: list[str]
     is_active: bool
     created_at: datetime.datetime
+
+
+# ---- Sources ----
+class SourceCreate(BaseModel):
+    client_id: uuid.UUID
+    label: str
+    type: SourceType = SourceType.s3
+    uri_prefix: str = Field(..., description="s3://bucket/prefix/ or https://...")
+    credential_ref: str | None = Field(
+        None, description="Name/ARN of a stored secret — never the secret itself."
+    )
+    sampling_override: dict[str, Any] | None = None
+    auto_sync: bool = False
+    scan_now: bool = Field(True, description="Enqueue an immediate sync on registration.")
+
+
+class SourceUpdate(BaseModel):
+    label: str | None = None
+    credential_ref: str | None = None
+    sampling_override: dict[str, Any] | None = None
+    auto_sync: bool | None = None
+    enabled: bool | None = Field(
+        None, description="Enable (connected) or disable (disabled) the source."
+    )
+
+
+class SourceFunnel(BaseModel):
+    total: int
+    to_ingest: int
+    ingested: int
+    in_review: int
+    done: int
+    failed: int
+
+
+class SourceOut(BaseModel):
+    id: uuid.UUID
+    client_id: uuid.UUID
+    label: str
+    type: str
+    uri_prefix: str
+    credential_ref: str | None
+    sampling_override: dict[str, Any] | None
+    status: str
+    auto_sync: bool
+    last_synced_at: datetime.datetime | None
+    last_error: str | None
+    last_sync_result: dict[str, Any] | None
+    created_at: datetime.datetime
+    funnel: SourceFunnel

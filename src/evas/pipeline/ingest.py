@@ -65,8 +65,10 @@ def handle_ingest(session: Session, job: ProcessingJob) -> None:
             return
 
         probe = probe_video(tmp_path)
+        source_ref = payload.get("source_id")
         video = Video(
             client_id=client_id,
+            source_id=uuid.UUID(str(source_ref)) if source_ref else None,
             external_ref=payload.get("external_ref"),
             original_filename=payload.get("original_filename"),
             source_uri=source_uri,

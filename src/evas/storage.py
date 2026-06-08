@@ -51,6 +51,29 @@ def upload_file(local_path: str, bucket: str, key: str, content_type: str | None
     return build_s3_uri(bucket, key)
 
 
+def list_objects(uri_prefix: str) -> list[str]:
+    """List object URIs under an s3://bucket/prefix (paginated). Returns full s3:// URIs.
+
+    The prefix need not name a key, so this does not use parse_s3_uri (which requires
+    a key). Zero-byte "directory marker" keys (ending in /) are skipped.
+    """
+    if not uri_prefix.startswith("s3://"):
+        raise ValueError(f"Not an s3:// URI: {uri_prefix}")
+    rest = uri_prefix[len("s3://") :]
+    bucket, _, prefix = rest.partition("/")
+    if not bucket:
+        raise ValueError(f"Malformed s3:// prefix (need a bucket): {uri_prefix}")
+    client = get_s3_client()
+    uris: list[str] = []
+    for page in client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith("/"):
+                continue
+            uris.append(build_s3_uri(bucket, key))
+    return uris
+
+
 def get_object_bytes(uri: str) -> bytes:
     bucket, key = parse_s3_uri(uri)
     resp = get_s3_client().get_object(Bucket=bucket, Key=key)

@@ -59,6 +59,12 @@ No new migration: the M1 migration already reproduces the whole schema (all M2 t
 
 **Defer (UI build is follow-up):** the React reviewer/ops/portal frontends in `EVAS_UI.md` are not built yet — backend only this milestone. `EVAS_AI_STUB=true` runs reviews offline (frame + clip).
 
+## Sources + AI Monitor — implemented (backend; see `@EVAS_SOURCES.md`, `@EVAS_AI_MONITOR.md`)
+
+- **Sources** — a `source` is a pointer to a place full of videos (S3 prefix; `url` reserved). Register one and a `sync_source` worker (`evas/pipeline/sync.py`) enumerates it (`storage.list_objects`, video-extension filter), dedups against known `source_uri`s, and enqueues `ingest` per new file tagged with `source_id`. Counts (`discovered/registered/skipped/failed`) are persisted to `sources.last_sync_result` so a partial/failed scan can't look complete; `failed>0` ⇒ `status=error`. **`url` raises a clear "not yet supported"** (records the error state + commits before raising) until a listing contract exists. Endpoints `/sources` CRUD + `POST /sources/{id}/sync` (admin); list/detail carry a derived **funnel** (`to_ingest/ingested/in_review/done/failed`). `evas sync-sources` (cron, `--all`/`--dry-run`) drives nightly `auto_sync`. `GET /videos?source_id=` scopes the board.
+- **AI Monitor** — admin observability over existing tables (no new data): `GET /ai/runs` (filterable run log + frames done/total, flagged, tokens, cost, duration), `GET /ai/runs/{id}` (per-frame findings, issues, cost/frame, AI-vs-human grade gap), `GET /ai/stats` (throughput/cost/confidence/flagged/error rates grouped by model & prompt_version). `POST /ai/runs/{id}/rerun` enqueues a fresh `ai_review` (new run, history preserved).
+- **Schema addition** — migration `0003` adds `sources`, `videos.source_id`, the `sync_source` `job_type` value (via `autocommit_block()` — `ALTER TYPE … ADD VALUE` can't run in a txn / be used in the same txn), and appends `source_id` to the `video_review_board` view. Mirrored into `evas_schema.sql` (enum value inline there for fresh installs).
+
 ## Development
 
 - Use the project venv: `.venv/bin/python` (created with `--system-site-packages`). `ruff` is the global install on PATH; `mypy`/`pytest` run via `.venv/bin/python -m …`.

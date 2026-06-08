@@ -61,6 +61,7 @@ def list_videos(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
     client_id: uuid.UUID | None = None,
+    source_id: uuid.UUID | None = None,
     status: str | None = None,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -75,6 +76,9 @@ def list_videos(
     if client_id is not None:
         sql += " AND client_id = :client_id"
         params["client_id"] = str(client_id)
+    if source_id is not None:
+        sql += " AND source_id = :source_id"
+        params["source_id"] = str(source_id)
     if status is not None:
         sql += " AND status = :status"
         params["status"] = status

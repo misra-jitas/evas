@@ -44,3 +44,14 @@ thresholds).
 images after `clients.frame_retention_days`, keep rows) and `archive`
 (transition source video to S3 Glacier after `clients.video_archive_days`).
 Use `--dry-run` to preview without queuing.
+
+## Source sync
+
+`evas sync-sources` (cron at 03:30) enqueues a `sync_source` job for every
+`auto_sync` source (enabled, not deleted), which re-scans the S3 prefix and
+ingests newly discovered videos. Use `--all` to sync every source regardless of
+`auto_sync`, `--dry-run` to preview. Per-scan counts land in
+`sources.last_sync_result`; a source with `status=error` (e.g. bad prefix/creds,
+or an unsupported `url` source) needs attention — check `sources.last_error`.
+
+    30 3 * * *  cd /srv/evas && .venv/bin/python -m evas.cli sync-sources

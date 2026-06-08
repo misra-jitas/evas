@@ -98,6 +98,9 @@ class FakeS3:
     def get_object_bytes(self, uri: str) -> bytes:
         return self.store[uri]
 
+    def list_objects(self, uri_prefix: str) -> list[str]:
+        return sorted(uri for uri in self.store if uri.startswith(uri_prefix))
+
     def delete_object(self, uri: str) -> None:
         self.store.pop(uri, None)
 
@@ -115,6 +118,7 @@ def fake_s3(monkeypatch: pytest.MonkeyPatch) -> FakeS3:
     monkeypatch.setattr("evas.pipeline.review.get_object_bytes", s3.get_object_bytes)
     monkeypatch.setattr("evas.pipeline.retention.delete_object", s3.delete_object)
     monkeypatch.setattr("evas.pipeline.retention.set_storage_class", s3.set_storage_class)
+    monkeypatch.setattr("evas.pipeline.sync.list_objects", s3.list_objects)
     return s3
 
 

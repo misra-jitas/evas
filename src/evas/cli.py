@@ -229,6 +229,38 @@ def retention_sweep(dry_run: bool) -> None:
     click.echo(f"{prefix} {purge_jobs} purge_frames and {archive_jobs} archive job(s)")
 
 
+@cli.command("sync-sources")
+@click.option("--all", "all_sources", is_flag=True, help="Sync every source, not just auto_sync.")
+@click.option("--dry-run", is_flag=True, help="Report what would be enqueued without queuing.")
+def sync_sources(all_sources: bool, dry_run: bool) -> None:
+    """Enqueue sync_source jobs for auto_sync (or --all) sources.
+
+    Intended to run nightly via cron, e.g.:
+        30 3 * * *  cd /srv/evas && .venv/bin/python -m evas.cli sync-sources
+    """
+    from evas.enums import SourceStatus
+    from evas.models import Source
+
+    enqueued = 0
+    with session_scope() as session:
+        stmt = select(Source).where(
+            Source.deleted_at.is_(None), Source.status != SourceStatus.disabled
+        )
+        if not all_sources:
+            stmt = stmt.where(Source.auto_sync.is_(True))
+        for source in session.scalars(stmt).all():
+            if not dry_run:
+                source.status = SourceStatus.syncing
+                enqueue(
+                    session, job_type=JobType.sync_source, payload={"source_id": str(source.id)}
+                )
+            enqueued += 1
+        if dry_run:
+            session.rollback()
+    prefix = "[dry-run] would enqueue" if dry_run else "enqueued"
+    click.echo(f"{prefix} {enqueued} sync_source job(s)")
+
+
 @cli.command("create-buckets")
 def create_buckets() -> None:
     """Create the configured S3 buckets (idempotent; works against MinIO)."""
