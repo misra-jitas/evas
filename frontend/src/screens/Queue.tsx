@@ -1,8 +1,11 @@
-// Reviewer Workbench: Queue screen. Priority-sorted assigned reviews + Start next.
-import { useEffect, useMemo, useState } from "react";
-import { Btn, ClientChip, FrameThumb, Grade, Ico, PriorityBadge } from "../components";
-import { D, sceneOf } from "../data";
-import type { Priority, TFn } from "../types";
+// Reviewer Workbench: Queue screen. Videos awaiting human review (status
+// ai_reviewed) from the live board (GET /videos), priority-sorted, with
+// "Start next". Clicking a row opens the live reviewer workbench for that video.
+import { useMemo, useState } from "react";
+import { api, useLive } from "../api";
+import { Btn, ClientChip, EmptyInline, FrameThumb, Grade, Ico, PriorityBadge } from "../components";
+import { sceneOf } from "../data";
+import type { BoardVideo, Priority, TFn } from "../types";
 
 export interface SessionState {
   reviewedToday: number;
@@ -12,32 +15,26 @@ export interface SessionState {
   agreeCount: number;
 }
 
-const ORDER: Record<Priority, number> = { rush: 0, high: 1, normal: 2 };
-
-function ago(m: number): string {
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m ago`;
+const ORDER: Record<string, number> = { rush: 0, high: 1, normal: 2, low: 3 };
+// PriorityBadge only renders rush/high/normal; map "low" onto normal.
+function badgePriority(p: string): Priority {
+  return (p === "rush" || p === "high" ? p : "normal") as Priority;
 }
 
 const COLS = "78px 96px 1fr 150px 86px 70px 78px 110px";
 
 export function QueueScreen({ t, onOpen, session }: { t: TFn; onOpen: (id: string) => void; session: SessionState }) {
-  const [loading, setLoading] = useState(true);
+  const live = useLive<BoardVideo[]>(() => api.boardVideos(), []);
   const [hover, setHover] = useState<string | null>(null);
 
-  useEffect(() => {
-    const id = setTimeout(() => setLoading(false), 620);
-    return () => clearTimeout(id);
-  }, []);
-
+  // Awaiting human review = AI done, not yet human-reviewed.
   const queue = useMemo(
-    () => [...D.QUEUE].sort((a, b) => ORDER[a.priority] - ORDER[b.priority] || b.assignedMins - a.assignedMins),
-    [],
+    () => live.data.filter((v) => v.status === "ai_reviewed").sort((a, b) => (ORDER[a.priority] ?? 2) - (ORDER[b.priority] ?? 2)),
+    [live.data],
   );
   const next = queue[0];
   const rushCount = queue.filter((q) => q.priority === "rush").length;
-  const totalFlagged = queue.reduce((s, q) => s + q.flaggedCount, 0);
+  const loading = live.loading;
 
   return (
     <div style={{ height: "100%", overflow: "auto", background: "var(--bg)" }}>
@@ -50,13 +47,11 @@ export function QueueScreen({ t, onOpen, session }: { t: TFn; onOpen: (id: strin
               <span className="mono tnum" style={{ color: "var(--ink)", fontWeight: 600 }}>{queue.length}</span> {t("queue.assigned")}
               <span style={{ margin: "0 8px", color: "var(--line-strong)" }}>·</span>
               <span className="mono tnum" style={{ color: "var(--red)", fontWeight: 600 }}>{rushCount}</span> rush
-              <span style={{ margin: "0 8px", color: "var(--line-strong)" }}>·</span>
-              <span className="mono tnum" style={{ color: "var(--amber)", fontWeight: 600 }}>{totalFlagged}</span> flagged frames
             </div>
           </div>
-          <Btn kind="primary" size="lg" icon="zap" onClick={() => onOpen(next.id)} style={{ boxShadow: "var(--shadow-2)" }}>
+          <Btn kind="primary" size="lg" icon="zap" onClick={() => next && onOpen(next.id)} disabled={!next} style={{ boxShadow: "var(--shadow-2)" }}>
             {t("queue.startnext")}
-            <span className="mono" style={{ fontSize: 11, opacity: 0.7, marginLeft: 8, padding: "1px 5px", border: "1px solid currentColor", borderRadius: 3 }}>{next?.ref}</span>
+            {next && <span className="mono" style={{ fontSize: 11, opacity: 0.7, marginLeft: 8, padding: "1px 5px", border: "1px solid currentColor", borderRadius: 3 }}>{next.ref}</span>}
           </Btn>
         </div>
 
@@ -87,61 +82,56 @@ export function QueueScreen({ t, onOpen, session }: { t: TFn; onOpen: (id: strin
 
         <div className="panel" style={{ overflow: "hidden", boxShadow: "var(--shadow-1)" }}>
           <div style={{ display: "grid", gridTemplateColumns: COLS, gap: 12, alignItems: "center", padding: "9px 16px", borderBottom: "1px solid var(--line)", background: "var(--panel-2)" }}>
-            {[t("queue.priority"), "", t("queue.ref"), t("queue.client"), t("queue.scene"), t("queue.ai"), t("queue.flagged"), t("queue.assignedat")].map((h, i) => (
-              <div key={i} className="label" style={{ textAlign: i === 5 || i === 6 ? "right" : "left" }}>{h}</div>
+            {[t("queue.priority"), "", t("queue.ref"), t("queue.client"), t("queue.scene"), t("queue.ai"), "", t("portal.uploaded")].map((h, i) => (
+              <div key={i} className="label" style={{ textAlign: i === 5 ? "right" : "left" }}>{h}</div>
             ))}
           </div>
 
-          {loading
-            ? Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} style={{ display: "grid", gridTemplateColumns: COLS, gap: 12, alignItems: "center", padding: "12px 16px", borderBottom: "1px solid var(--line-2)" }}>
-                  <div className="skel" style={{ height: 16, width: 48 }} />
-                  <div className="skel" style={{ height: 34, width: 60, borderRadius: 4 }} />
-                  <div className="skel" style={{ height: 14, width: "70%" }} />
-                  <div className="skel" style={{ height: 14, width: "80%" }} />
-                  <div className="skel" style={{ height: 14, width: 50 }} />
-                  <div className="skel" style={{ height: 14, width: 28, marginLeft: "auto" }} />
-                  <div className="skel" style={{ height: 14, width: 28, marginLeft: "auto" }} />
-                  <div className="skel" style={{ height: 14, width: 70 }} />
+          {loading ? (
+            Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: COLS, gap: 12, alignItems: "center", padding: "12px 16px", borderBottom: "1px solid var(--line-2)" }}>
+                <div className="skel" style={{ height: 16, width: 48 }} />
+                <div className="skel" style={{ height: 34, width: 60, borderRadius: 4 }} />
+                <div className="skel" style={{ height: 14, width: "70%" }} />
+                <div className="skel" style={{ height: 14, width: "80%" }} />
+                <div className="skel" style={{ height: 14, width: 50 }} />
+                <div className="skel" style={{ height: 14, width: 28, marginLeft: "auto" }} />
+                <div className="skel" style={{ height: 14, width: 28 }} />
+                <div className="skel" style={{ height: 14, width: 70 }} />
+              </div>
+            ))
+          ) : queue.length === 0 ? (
+            <EmptyInline icon="check" msg={t("queue.empty")} />
+          ) : (
+            queue.map((q, i) => (
+              <div
+                key={q.id}
+                className="fade-in"
+                onClick={() => onOpen(q.id)}
+                onMouseEnter={() => setHover(q.id)}
+                onMouseLeave={() => setHover(null)}
+                style={{ display: "grid", gridTemplateColumns: COLS, gap: 12, alignItems: "center", padding: "11px 16px", cursor: "pointer", borderBottom: i < queue.length - 1 ? "1px solid var(--line-2)" : "none", background: hover === q.id ? "var(--panel-2)" : "transparent", animationDelay: `${i * 28}ms`, position: "relative" }}
+              >
+                {q.priority === "rush" && <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: "var(--red)" }} />}
+                <div><PriorityBadge p={badgePriority(q.priority)} /></div>
+                <FrameThumb frame={{ hue: sceneOf(q.scene).hue, timecode: "00:00:00", flagged: false }} style={{ width: 60, height: 34 }} showHud={false} />
+                <div style={{ minWidth: 0 }}>
+                  <div className="mono" style={{ fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em" }}>{q.ref}</div>
+                  <div style={{ fontSize: 11, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.aiModel || "—"}</div>
                 </div>
-              ))
-            : queue.map((q, i) => (
-                <div
-                  key={q.id}
-                  className="fade-in"
-                  onClick={() => onOpen(q.id)}
-                  onMouseEnter={() => setHover(q.id)}
-                  onMouseLeave={() => setHover(null)}
-                  style={{ display: "grid", gridTemplateColumns: COLS, gap: 12, alignItems: "center", padding: "11px 16px", cursor: "pointer", borderBottom: i < queue.length - 1 ? "1px solid var(--line-2)" : "none", background: hover === q.id ? "var(--panel-2)" : "transparent", animationDelay: `${i * 28}ms`, position: "relative" }}
-                >
-                  {q.priority === "rush" && <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: "var(--red)" }} />}
-                  <div><PriorityBadge p={q.priority} /></div>
-                  <FrameThumb frame={{ hue: sceneOf(q.scene).hue, timecode: "00:00:00", flagged: false }} style={{ width: 60, height: 34 }} showHud={false} />
-                  <div style={{ minWidth: 0 }}>
-                    <div className="mono" style={{ fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em" }}>{q.ref}</div>
-                    <div style={{ fontSize: 11, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.duration} · {q.frameCount} {t("queue.frames").toLowerCase()}</div>
-                  </div>
-                  <ClientChip client={q.client} />
-                  <div className="mono" style={{ fontSize: 11, color: "var(--ink-2)", letterSpacing: "0.04em" }}>{q.sceneLabel}</div>
-                  <div style={{ textAlign: "right" }}><Grade value={q.aiGrade} /></div>
-                  <div style={{ textAlign: "right" }}>
-                    {q.flaggedCount > 0 ? (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "var(--amber)" }}>
-                        <Ico name="flag" size={12} fill="var(--amber)" stroke="none" />
-                        <span className="mono tnum" style={{ fontSize: 12, fontWeight: 600 }}>{q.flaggedCount}</span>
-                      </span>
-                    ) : (
-                      <span className="mono" style={{ color: "var(--ink-4)" }}>0</span>
-                    )}
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{ago(q.assignedMins)}</span>
-                    <span style={{ opacity: hover === q.id ? 1 : 0, transition: "opacity .12s", color: "var(--accent)" }}>
-                      <Ico name="arrowR" size={15} />
-                    </span>
-                  </div>
+                <ClientChip client={q.clientObj} />
+                <div className="mono" style={{ fontSize: 11, color: "var(--ink-2)", letterSpacing: "0.04em" }}>{sceneOf(q.scene).label}</div>
+                <div style={{ textAlign: "right" }}><Grade value={q.aiGrade} /></div>
+                <div />
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{q.uploaded}</span>
+                  <span style={{ opacity: hover === q.id ? 1 : 0, transition: "opacity .12s", color: "var(--accent)" }}>
+                    <Ico name="arrowR" size={15} />
+                  </span>
                 </div>
-              ))}
+              </div>
+            ))
+          )}
         </div>
 
         <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8, color: "var(--ink-4)", fontSize: 12 }}>

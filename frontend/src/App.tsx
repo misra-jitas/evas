@@ -269,8 +269,11 @@ export function App() {
       if (streak > 0 && streak % 6 === 0) setBreakNudge(true);
       return { ...s, reviewedToday: s.reviewedToday + 1, streak, agreeSum, agreeCount };
     });
+    // Mock reviews chain to the next mock item; live reviews (ref not in the
+    // mock queue) return to the Queue, which reloads from the board with the
+    // just-reviewed video now dropped out (it's human_reviewed).
     const idx = sortedQueue.findIndex((q) => q.id === r.ref);
-    const next = sortedQueue[idx + 1];
+    const next = idx >= 0 ? sortedQueue[idx + 1] : undefined;
     if (next) setRoute({ screen: "review", id: next.id });
     else {
       setRoute({ screen: "queue" });
