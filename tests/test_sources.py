@@ -172,6 +172,25 @@ def test_url_source_is_not_yet_supported(auth_headers, fake_s3) -> None:
     assert detail["last_sync_result"]["error"] == "unsupported_source_type"
 
 
+def test_scan_list_failure_marks_source_error(auth_headers, fake_s3, monkeypatch) -> None:
+    """A bucket-listing failure must move the source to 'error', not sit on 'syncing'."""
+    client_id = _seed_client()
+    src = _register(client_id, auth_headers, uri_prefix="s3://nonexistent-bucket/")
+    source_id = src["id"]
+
+    def boom(_prefix: str):
+        raise RuntimeError("NoSuchBucket: The specified bucket does not exist")
+
+    monkeypatch.setattr("evas.pipeline.sync.list_objects", boom)
+    while worker.run_once():
+        pass
+
+    detail = client.get(f"/sources/{source_id}", headers=auth_headers).json()
+    assert detail["status"] == "error"  # not stuck on "syncing"
+    assert "NoSuchBucket" in detail["last_error"]
+    assert detail["last_sync_result"]["error"] == "list_failed"
+
+
 def test_patch_disable_and_soft_delete(auth_headers, fake_s3) -> None:
     client_id = _seed_client()
     src = _register(client_id, auth_headers, scan_now=False)

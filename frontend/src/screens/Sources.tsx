@@ -61,7 +61,9 @@ export function SourcesScreen({
   const [showReg, setShowReg] = useState(false);
   const [editing, setEditing] = useState<Source | null>(null);
   const [deleting, setDeleting] = useState<Source | null>(null);
-  const [syncing, setSyncing] = useState<Record<string, boolean>>({});
+  // Bumped to 0 to (re)start polling whenever a sync is kicked off; the poll
+  // effect reloads the list while anything is mid-sync, up to a cap.
+  const [pollTick, setPollTick] = useState(99);
   // Live clients for the register modal's picker (falls back to mock clients).
   const clientsLive = useLive<SelectOption[]>(
     () => api.listClients().then((rows) => rows.map((c) => ({ v: c.id, l: c.name }))),
@@ -70,15 +72,23 @@ export function SourcesScreen({
 
   useEffect(() => setSources(live.data), [live.data]);
 
-  function syncNow(id: string) {
-    setSyncing((s) => ({ ...s, [id]: true }));
-    setSources((prev) => prev.map((x) => (x.id === id ? { ...x, status: "syncing" } : x)));
-    api.syncSource(id).catch(() => {});
-    setTimeout(() => {
-      setSyncing((s) => ({ ...s, [id]: false }));
-      setSources((prev) => prev.map((x) => (x.id === id ? { ...x, status: x.lastError ? "error" : "connected", lastSync: 0 } : x)));
+  // While any source is mid-sync, poll the list so the UI lands on the terminal
+  // server state (connected / error) instead of sitting on "syncing" forever.
+  // Capped so a genuinely stuck source can't poll indefinitely.
+  useEffect(() => {
+    if (!sources.some((s) => s.status === "syncing") || pollTick >= 15) return;
+    const id = setTimeout(() => {
+      setPollTick((n) => n + 1);
       live.reload();
-    }, 1600);
+    }, 2000);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sources, pollTick]);
+
+  function syncNow(id: string) {
+    setSources((prev) => prev.map((x) => (x.id === id ? { ...x, status: "syncing" } : x)));
+    setPollTick(0);
+    api.syncSource(id).catch(() => live.reload());
   }
 
   function register(form: { type: "s3" | "url"; uri: string; label: string; client: string; cred: string; autoSync: boolean }) {
@@ -108,7 +118,10 @@ export function SourcesScreen({
     // never fabricate discovery counts.
     api
       .createSource({ client_id: form.client, label: form.label, type: form.type, uri_prefix: form.uri, credential_ref: form.cred, auto_sync: form.autoSync })
-      .then(() => setTimeout(() => live.reload(), 1800))
+      .then(() => {
+        setPollTick(0); // poll until the scan reaches a terminal state
+        live.reload();
+      })
       .catch((e) => {
         setSources((prev) => prev.map((x) => (x.id === ns.id ? { ...x, status: "error", lastError: String(e?.message || e) } : x)));
       });
@@ -187,7 +200,7 @@ export function SourcesScreen({
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
                     <ClientChip client={s.clientObj} />
-                    <StatusBadge status={syncing[s.id] ? "syncing" : s.status} label={syncing[s.id] ? t("src.syncing") : t("src." + s.status)} />
+                    <StatusBadge status={s.status} label={t("src." + s.status)} />
                   </div>
                 </div>
                 <div style={{ marginTop: 14 }}>
@@ -212,12 +225,12 @@ export function SourcesScreen({
                 </div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line-2)" }} onClick={(e) => e.stopPropagation()}>
                   <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: "var(--ink-3)" }}>
-                    <Ico name="clock" size={13} /> {t("src.lastsync")} {ago(syncing[s.id] ? 0 : s.lastSync)}
+                    <Ico name="clock" size={13} /> {t("src.lastsync")} {ago(s.status === "syncing" ? 0 : s.lastSync)}
                     {s.autoSync && (<span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "var(--accent)" }}><Ico name="refresh" size={12} /> auto</span>)}
                   </span>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <Btn kind="default" size="sm" icon="refresh" onClick={() => syncNow(s.id)} disabled={syncing[s.id] || s.status === "disabled"}>
-                      {syncing[s.id] ? t("src.syncing") : t("src.syncnow")}
+                    <Btn kind="default" size="sm" icon="refresh" onClick={() => syncNow(s.id)} disabled={s.status === "syncing" || s.status === "disabled"}>
+                      {s.status === "syncing" ? t("src.syncing") : t("src.syncnow")}
                     </Btn>
                     <Kebab items={[{ label: "Edit", icon: "sliders", onClick: () => setEditing(s) }, { label: s.status === "disabled" ? "Enable" : "Disable", icon: "power", onClick: () => toggleEnabled(s) }, { label: "Delete", icon: "x", danger: true, onClick: () => setDeleting(s) }]} />
                   </div>

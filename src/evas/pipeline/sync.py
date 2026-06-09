@@ -81,7 +81,36 @@ def handle_sync_source(session: Session, job: ProcessingJob) -> None:
         ).all()
     }
 
-    for uri in list_objects(source.uri_prefix):
+    # Enumerate the bucket/prefix. A listing failure (bad bucket, no access,
+    # network) must not leave the source stuck in 'syncing' — record the error
+    # state, commit, then re-raise so the job retries/dead-letters normally.
+    try:
+        objects = list_objects(source.uri_prefix)
+    except Exception as exc:  # noqa: BLE001 - surface any backend/list error as source error
+        msg = f"could not list {source.uri_prefix}: {exc!r}"
+        source.status = SourceStatus.error
+        source.last_error = msg[:500]
+        source.last_synced_at = _now()
+        source.last_sync_result = {
+            "discovered": 0,
+            "registered": 0,
+            "linked": 0,
+            "skipped": 0,
+            "failed": 0,
+            "error": "list_failed",
+            "at": source.last_synced_at.isoformat(),
+        }
+        write_audit(
+            session,
+            entity_type="source",
+            entity_id=source.id,
+            action="sync_failed",
+            new_value=source.last_sync_result,
+        )
+        session.commit()
+        raise
+
+    for uri in objects:
         if not _is_video(uri):
             continue
         discovered += 1
