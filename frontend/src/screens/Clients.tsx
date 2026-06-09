@@ -2,24 +2,13 @@
 // Wired to /clients CRUD with optimistic local updates + mock fallback.
 import { useEffect, useState } from "react";
 import { api, type ClientInput, type ClientRecord, useLive } from "../api";
-import { Btn, Field, fieldInput, Ico, Kebab, Modal, Row } from "../components";
-import { D } from "../data";
+import { Btn, EmptyInline, Field, fieldInput, Ico, Kebab, Modal, Row } from "../components";
 import type { TFn } from "../types";
-
-const FALLBACK: ClientRecord[] = D.CLIENTS.map((c) => ({
-  id: c.id,
-  name: c.name,
-  slug: c.id,
-  sampling_config: { interval_seconds: 5, max_frames: 300, frame_width: 1280 },
-  frame_retention_days: null,
-  video_archive_days: null,
-  video_count: 0,
-}));
 
 const COLS = "1.4fr 1fr 90px 110px 110px 44px";
 
 export function ClientsScreen({ t }: { t: TFn }) {
-  const live = useLive<ClientRecord[]>(() => api.listClients(), FALLBACK);
+  const live = useLive<ClientRecord[]>(() => api.listClients(), []);
   const [clients, setClients] = useState<ClientRecord[]>(live.data);
   const [editing, setEditing] = useState<ClientRecord | "new" | null>(null);
 
@@ -71,6 +60,7 @@ export function ClientsScreen({ t }: { t: TFn }) {
               <span key={i} className="label">{h}</span>
             ))}
           </Row>
+          {clients.length === 0 && <EmptyInline icon="user" msg={t("clients.empty")} />}
           {clients.map((c, i) => (
             <Row key={c.id} cols={COLS} last={i === clients.length - 1}>
               <span style={{ display: "flex", alignItems: "center", gap: 9 }}>

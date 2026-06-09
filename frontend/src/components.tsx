@@ -2,6 +2,7 @@
 // Ported verbatim (visually) from the design prototype; inline styles + theme.css
 // custom properties drive the look, so this matches the mock pixel-for-pixel.
 import React from "react";
+import { createPortal } from "react-dom";
 import type { Client, FrameItem, Source, TFn } from "./types";
 
 type CSS = React.CSSProperties;
@@ -615,32 +616,65 @@ export function CostLine({ label, value }: { label: string; value: string }) {
 
 export function Kebab({ items }: { items: { label: string; icon: string; danger?: boolean; onClick?: () => void }[] }) {
   const [open, setOpen] = React.useState(false);
+  const [coords, setCoords] = React.useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const btnRef = React.useRef<HTMLButtonElement>(null);
+  const MENU_W = 150;
+
+  // Position the menu from the button's viewport rect (fixed) so it is never
+  // clipped by an ancestor's overflow:hidden (e.g. a table panel). Flips up
+  // when there isn't room below.
+  const place = React.useCallback(() => {
+    const r = btnRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const estH = items.length * 36 + 10;
+    const below = r.bottom + 6;
+    const top = below + estH > window.innerHeight ? Math.max(8, r.top - estH - 6) : below;
+    const left = Math.max(8, Math.min(r.right - MENU_W, window.innerWidth - MENU_W - 8));
+    setCoords({ top, left });
+  }, [items.length]);
+
   React.useEffect(() => {
     if (!open) return;
-    const h = () => setOpen(false);
-    window.addEventListener("click", h);
-    return () => window.removeEventListener("click", h);
+    const close = () => setOpen(false);
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
   }, [open]);
+
   return (
     <span style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
-      <button onClick={() => setOpen((o) => !o)} style={{ width: 30, height: 30, borderRadius: 5, border: "1px solid var(--line)", background: "var(--panel)", display: "grid", placeItems: "center", color: "var(--ink-3)" }}>
+      <button
+        ref={btnRef}
+        onClick={() => {
+          if (!open) place();
+          setOpen((o) => !o);
+        }}
+        style={{ width: 30, height: 30, borderRadius: 5, border: "1px solid var(--line)", background: "var(--panel)", display: "grid", placeItems: "center", color: "var(--ink-3)" }}
+      >
         <Ico name="kebab" size={16} />
       </button>
-      {open && (
-        <div className="panel" style={{ position: "absolute", right: 0, top: 36, width: 150, padding: 5, zIndex: 50, boxShadow: "var(--shadow-pop)", animation: "evas-pop .13s both" }}>
-          {items.map((it) => (
-            <button
-              key={it.label}
-              onClick={() => { setOpen(false); it.onClick?.(); }}
-              style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "8px 10px", border: "none", background: "transparent", borderRadius: 4, fontSize: 12.5, color: it.danger ? "var(--red)" : "var(--ink-2)", textAlign: "left" }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel-2)")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            >
-              <Ico name={it.icon} size={14} /> {it.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <div className="panel" style={{ position: "fixed", top: coords.top, left: coords.left, width: MENU_W, padding: 5, zIndex: 1000, boxShadow: "var(--shadow-pop)", animation: "evas-pop .13s both" }} onClick={(e) => e.stopPropagation()}>
+            {items.map((it) => (
+              <button
+                key={it.label}
+                onClick={() => { setOpen(false); it.onClick?.(); }}
+                style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "8px 10px", border: "none", background: "transparent", borderRadius: 4, fontSize: 12.5, color: it.danger ? "var(--red)" : "var(--ink-2)", textAlign: "left" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel-2)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              >
+                <Ico name={it.icon} size={14} /> {it.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
     </span>
   );
 }
