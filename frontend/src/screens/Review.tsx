@@ -3,6 +3,7 @@
 // submit→next, fading shortcut hints. Operates on the rich mock review model
 // (frame-level findings); live human-review writes are a documented follow-up.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { api } from "../api";
 import { Btn, ClientChip, ConfBar, FrameThumb, Grade, Ico, Meta, Modal, Stat } from "../components";
 import { D, sceneOf } from "../data";
 import type { Frame, ItemState, TFn } from "../types";
@@ -55,6 +56,25 @@ export function ReviewScreen({
   const [history, setHistory] = useState<{ frames: Frame[]; label: string }[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [saved, setSaved] = useState(true);
+
+  // The human reviewer watches the *actual* video. When opened from the live
+  // board, reviewId is a real video UUID → fetch a short-lived presigned URL.
+  const isLiveVideo = /^[0-9a-f-]{36}$/i.test(reviewId);
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isLiveVideo) {
+      setMediaUrl(null);
+      return;
+    }
+    let alive = true;
+    api
+      .videoMedia(reviewId)
+      .then((m) => alive && setMediaUrl(m.url))
+      .catch(() => alive && setMediaUrl(null));
+    return () => {
+      alive = false;
+    };
+  }, [reviewId, isLiveVideo]);
 
   const [kbdUses, setKbdUses] = useState(() => +(localStorage.getItem("evas-kbd-uses") || 0));
   const [hintHover, setHintHover] = useState(false);
@@ -385,8 +405,25 @@ export function ReviewScreen({
         {/* LEFT RAIL */}
         <aside style={{ borderRight: "1px solid var(--line)", display: "flex", flexDirection: "column", background: "var(--panel)", overflow: "auto", minHeight: 0 }}>
           <div style={{ padding: 14 }}>
-            <div className="label" style={{ marginBottom: 8 }}>{t("review.context")}</div>
-            <FrameThumb frame={selected} large style={{ width: "100%", aspectRatio: "16/10" }} />
+            <div className="label" style={{ marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span>{t("review.context")}</span>
+              {mediaUrl && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "var(--accent)", fontSize: 9.5, letterSpacing: "0.04em" }}>
+                  <Ico name="play" size={11} /> {t("review.fullvideo")}
+                </span>
+              )}
+            </div>
+            {mediaUrl ? (
+              <video
+                src={mediaUrl}
+                controls
+                playsInline
+                preload="metadata"
+                style={{ width: "100%", aspectRatio: "16/10", borderRadius: 3, background: "#000", display: "block" }}
+              />
+            ) : (
+              <FrameThumb frame={selected} large style={{ width: "100%", aspectRatio: "16/10" }} />
+            )}
             <div style={{ marginTop: 8 }}>
               <div
                 onClick={(e) => {

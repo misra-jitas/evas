@@ -81,6 +81,21 @@ def get_object_bytes(uri: str) -> bytes:
     return data
 
 
+def presign_get(uri: str, expires_in: int = 3600) -> str:
+    """Presigned GET URL for an object, so a browser can fetch it directly.
+
+    Supports range requests (video seeking) natively. Against MinIO the URL
+    points at the configured endpoint (reachable by the browser in dev);
+    against real S3 it is a public-internet URL.
+    """
+    bucket, key = parse_s3_uri(uri)
+    return get_s3_client().generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": key},
+        ExpiresIn=expires_in,
+    )
+
+
 def delete_object(uri: str) -> None:
     bucket, key = parse_s3_uri(uri)
     get_s3_client().delete_object(Bucket=bucket, Key=key)

@@ -70,6 +70,7 @@ export interface Frame {
   note: string;
   desc: string;
   items: FrameItem[];
+  src?: string | null; // real extracted-frame image URL (live runs); mock frames omit it
 }
 
 export interface QueueItem {

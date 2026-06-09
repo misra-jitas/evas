@@ -98,6 +98,12 @@ class FakeS3:
     def get_object_bytes(self, uri: str) -> bytes:
         return self.store[uri]
 
+    def presign_get(self, uri: str, expires_in: int = 3600) -> str:
+        # parse_s3_uri-equivalent validation; return a deterministic fake URL.
+        if not uri.startswith("s3://"):
+            raise ValueError(uri)
+        return f"https://fake-s3.local/{uri[len('s3://') :]}?sig=test&exp={expires_in}"
+
     def list_objects(self, uri_prefix: str) -> list[str]:
         return sorted(uri for uri in self.store if uri.startswith(uri_prefix))
 
@@ -119,6 +125,8 @@ def fake_s3(monkeypatch: pytest.MonkeyPatch) -> FakeS3:
     monkeypatch.setattr("evas.pipeline.retention.delete_object", s3.delete_object)
     monkeypatch.setattr("evas.pipeline.retention.set_storage_class", s3.set_storage_class)
     monkeypatch.setattr("evas.pipeline.sync.list_objects", s3.list_objects)
+    # API media/frame-image endpoints presign via the storage module.
+    monkeypatch.setattr("evas.storage.presign_get", s3.presign_get)
     return s3
 
 

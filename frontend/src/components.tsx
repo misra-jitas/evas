@@ -104,6 +104,7 @@ export interface ThumbFrame {
   hue: number;
   timecode?: string;
   flagged?: boolean;
+  src?: string | null; // real extracted-frame image; falls back to the synthetic POV when absent
 }
 export function FrameThumb({
   frame,
@@ -120,36 +121,50 @@ export function FrameThumb({
   const sky = `oklch(0.62 0.07 ${h})`;
   const ground = `oklch(0.34 0.05 ${h + 8})`;
   const horizon = large ? "46%" : "50%";
+  const real = !!frame.src;
   return (
     <div
       style={{
         position: "relative",
         overflow: "hidden",
         borderRadius: 3,
-        background: `linear-gradient(${ground} 0%, oklch(0.42 0.05 ${h}) ${horizon}, ${sky} ${horizon}, oklch(0.7 0.06 ${h}) 100%)`,
+        background: real
+          ? "var(--panel-3)"
+          : `linear-gradient(${ground} 0%, oklch(0.42 0.05 ${h}) ${horizon}, ${sky} ${horizon}, oklch(0.7 0.06 ${h}) 100%)`,
         ...style,
       }}
     >
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          background: `radial-gradient(120% 90% at 50% 55%, transparent 52%, oklch(0.1 0.02 ${h} / 0.55) 100%)`,
-        }}
-      />
-      <div
-        style={{
-          position: "absolute",
-          left: "50%",
-          bottom: large ? -28 : -14,
-          width: large ? 220 : 70,
-          height: large ? 120 : 40,
-          transform: "translateX(-50%)",
-          borderRadius: "50% 50% 0 0",
-          background: `oklch(0.4 0.06 ${h + 20} / 0.85)`,
-          filter: "blur(0.5px)",
-        }}
-      />
+      {real ? (
+        <img
+          src={frame.src as string}
+          alt={frame.timecode ? `frame ${frame.timecode}` : "frame"}
+          loading="lazy"
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+        />
+      ) : (
+        <>
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: `radial-gradient(120% 90% at 50% 55%, transparent 52%, oklch(0.1 0.02 ${h} / 0.55) 100%)`,
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              left: "50%",
+              bottom: large ? -28 : -14,
+              width: large ? 220 : 70,
+              height: large ? 120 : 40,
+              transform: "translateX(-50%)",
+              borderRadius: "50% 50% 0 0",
+              background: `oklch(0.4 0.06 ${h + 20} / 0.85)`,
+              filter: "blur(0.5px)",
+            }}
+          />
+        </>
+      )}
       {showHud && (
         <div
           style={{
@@ -165,19 +180,23 @@ export function FrameThumb({
           }}
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: large ? 11 : 8, textShadow: "0 1px 2px rgba(0,0,0,.6)" }}>
-              <span className="rec-dot" style={{ width: large ? 7 : 5, height: large ? 7 : 5, borderRadius: 99, background: "oklch(0.62 0.23 25)", display: "inline-block" }} />
-              REC
-            </span>
+            {real ? (
+              <span />
+            ) : (
+              <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: large ? 11 : 8, textShadow: "0 1px 2px rgba(0,0,0,.6)" }}>
+                <span className="rec-dot" style={{ width: large ? 7 : 5, height: large ? 7 : 5, borderRadius: 99, background: "oklch(0.62 0.23 25)", display: "inline-block" }} />
+                REC
+              </span>
+            )}
             <span style={{ fontSize: large ? 11 : 8, textShadow: "0 1px 2px rgba(0,0,0,.6)" }}>{frame.timecode}</span>
           </div>
-          {large && (
+          {large && !real && (
             <div style={{ alignSelf: "center", width: 26, height: 26, border: "1.5px solid oklch(0.97 0 0 / 0.7)", borderRadius: 99, display: "flex", alignItems: "center", justifyContent: "center" }}>
               <div style={{ width: 3, height: 3, borderRadius: 99, background: "oklch(0.97 0 0 / 0.9)" }} />
             </div>
           )}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", fontSize: large ? 10 : 7 }}>
-            <span style={{ textShadow: "0 1px 2px rgba(0,0,0,.6)", opacity: 0.9, whiteSpace: "nowrap" }}>{large ? "POV · 1440p · 30fps" : ""}</span>
+            <span style={{ textShadow: "0 1px 2px rgba(0,0,0,.6)", opacity: 0.9, whiteSpace: "nowrap" }}>{large && !real ? "POV · 1440p · 30fps" : ""}</span>
           </div>
         </div>
       )}

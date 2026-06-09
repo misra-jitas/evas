@@ -46,6 +46,7 @@ class FrameFindingOut(BaseModel):
     timecode_seconds: float
     timecode_label: str
     image_uri: str
+    image_url: str | None = None  # presigned, browser-fetchable; null if purged
     purged: bool
     description: str | None = None
     findings: dict[str, Any] | None = None

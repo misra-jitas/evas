@@ -278,7 +278,7 @@ function RunDetail({ t, runId, onBack, onOpenDiscrepancy }: { t: TFn; runId: str
 
         <div className="panel" style={{ padding: 18, marginBottom: 18 }}>
           <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
-            <FrameThumb frame={{ hue: scene.hue, timecode: "00:00:00", flagged: false }} large style={{ width: 220, aspectRatio: "16/10", flexShrink: 0 }} />
+            <FrameThumb frame={selected || { hue: scene.hue, timecode: "00:00:00", flagged: false }} large style={{ width: 220, aspectRatio: "16/10", flexShrink: 0 }} />
             <div style={{ flex: 1, minWidth: 240 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <h1 className="mono" style={{ fontSize: 20, whiteSpace: "nowrap" }}>{run.ref}</h1>

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from evas import storage
 from evas.api.schemas import (
     AiRunOut,
     FrameFindingOut,
@@ -140,6 +141,7 @@ def get_video(
                 timecode_seconds=float(frame.timecode_seconds),
                 timecode_label=frame.timecode_label,
                 image_uri=frame.image_uri,
+                image_url=None if frame.purged else storage.presign_get(frame.image_uri),
                 purged=frame.purged,
                 description=finding.description if finding else None,
                 findings=finding.findings if finding else None,
@@ -167,6 +169,29 @@ def get_video(
         latest_ai_run=run_out,
         frames=frame_out,
     )
+
+
+@router.get("/videos/{video_id}/media")
+def get_video_media(
+    video_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Presigned URL for the original video so a reviewer can watch/seek it.
+
+    Tenancy-scoped; the URL is short-lived and supports range requests.
+    """
+    video = _get_active_video(session, video_id)
+    assert_can_access_client(user, video.client_id)
+    expires_in = 3600
+    return {
+        "url": storage.presign_get(video.source_uri, expires_in=expires_in),
+        "expires_in": expires_in,
+        "filename": video.original_filename,
+        "duration_seconds": float(video.duration_seconds)
+        if video.duration_seconds is not None
+        else None,
+    }
 
 
 @router.get("/videos/{video_id}/export")

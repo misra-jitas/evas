@@ -271,6 +271,7 @@ interface RawDetailFrame {
   frame_index: number;
   timecode_label: string;
   timecode_seconds: number;
+  image_url: string | null;
   description: string | null;
   findings: Record<string, { value: unknown; confidence: number | null }>;
   flagged: boolean;
@@ -303,7 +304,7 @@ function adaptRunDetail(r: RawRunDetail): AiRunDetail {
       conf: val?.confidence ?? 0,
       state: "pending",
     }));
-    return { id: `fr-${f.frame_index}`, idx: f.frame_index, t: f.timecode_seconds, timecode: f.timecode_label, scene, hue: sceneOf(scene).hue, flagged: f.flagged, touched: false, note: "", desc: f.description || "", items };
+    return { id: `fr-${f.frame_index}`, idx: f.frame_index, t: f.timecode_seconds, timecode: f.timecode_label, scene, hue: sceneOf(scene).hue, flagged: f.flagged, touched: false, note: "", desc: f.description || "", items, src: f.image_url };
   });
   return {
     id: r.id,
@@ -394,6 +395,10 @@ export const api = {
     warmClients()
       .then(() => request<RawBoard[]>(`/videos${sourceId ? `?source_id=${sourceId}` : ""}`))
       .then((rows) => rows.map(adaptBoard)),
+  videoMedia: (id: string) =>
+    request<{ url: string; expires_in: number; filename: string | null; duration_seconds: number | null }>(
+      `/videos/${id}/media`,
+    ),
   rerun: (id: string) => request(`/ai/runs/${id}/rerun`, { method: "POST" }),
   adminMetrics: () =>
     request<{ dead_jobs: number; queue_depth: number; running_jobs: number; webhook_failures: number }>(

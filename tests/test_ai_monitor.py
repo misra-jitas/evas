@@ -75,6 +75,7 @@ def test_run_drilldown(auth_headers, fake_s3, fake_ai, sample_video_bytes) -> No
     assert body["frames"]
     first = body["frames"][0]
     assert "findings" in first and "confidence" in first
+    assert first["image_url"] is not None  # presigned, browser-fetchable frame image
     assert body["cost"]["cost_per_frame"] is not None
     assert body["issues"]["flagged_count"] >= 1
     assert "grade" in body["human"]  # no human review yet → null, key present

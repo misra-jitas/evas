@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from evas import storage
 from evas.api.schemas import JobAccepted
 from evas.auth import require_roles
 from evas.db import get_session
@@ -234,6 +235,7 @@ def get_run(
                 "frame_index": frame.frame_index,
                 "timecode_label": frame.timecode_label,
                 "timecode_seconds": float(frame.timecode_seconds),
+                "image_url": None if frame.purged else storage.presign_get(frame.image_uri),
                 "description": finding.description,
                 "findings": finding.findings,
                 "confidence": float(finding.confidence) if finding.confidence is not None else None,
