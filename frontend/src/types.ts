@@ -213,6 +213,21 @@ export interface Job {
   at: string;
 }
 
+export interface BoardVideo {
+  id: string;
+  ref: string;
+  clientId: string;
+  clientObj: Client;
+  status: string; // raw VideoStatus
+  priority: string;
+  aiGrade: number | null;
+  aiModel: string | null;
+  humanGrade: number | null;
+  gap: number | null;
+  scene: string;
+  uploaded: string;
+}
+
 export interface PortalVideo {
   ref: string;
   uploaded: string;

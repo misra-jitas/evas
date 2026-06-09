@@ -46,7 +46,7 @@ export function SourcesScreen({
   onOpen: (screen: "sources" | "detail", id?: string) => void;
   onOpenReview: (id: string) => void;
 }) {
-  const live = useLive<Source[]>(() => api.listSources(), D.SOURCES);
+  const live = useLive<Source[]>(() => api.listSources(), []);
   const [sources, setSources] = useState<Source[]>(live.data);
   const [showReg, setShowReg] = useState(false);
   const [syncing, setSyncing] = useState<Record<string, boolean>>({});

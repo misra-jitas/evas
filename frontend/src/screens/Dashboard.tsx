@@ -1,25 +1,11 @@
-// Ops Dashboard (admin): pipeline · discrepancy · throughput · cost, plus
-// /videos and /jobs sub-views. The pipeline "failed" card is overlaid from the
-// live GET /admin/metrics (dead_jobs); the rest use mock aggregates (no single
-// matching endpoint — gaps stay mock per scope).
+// Ops Dashboard (admin): pipeline + discrepancy from the live video board
+// (GET /videos), Jobs from GET /admin/metrics, plus /videos sub-view. Cost and
+// reviewer-throughput have no API endpoint yet and show honest empty states.
 import { useState } from "react";
 import { api, useLive } from "../api";
-import {
-  Avatar,
-  BarCell,
-  Btn,
-  ClientChip,
-  EmptyInline,
-  FrameThumb,
-  Grade,
-  Ico,
-  Row,
-  SearchBox,
-  Select,
-  Spark,
-} from "../components";
-import { D, sceneOf } from "../data";
-import type { TFn } from "../types";
+import { ClientChip, EmptyInline, FrameThumb, Grade, Ico, Row, SearchBox, Select } from "../components";
+import { sceneOf } from "../data";
+import type { BoardVideo, TFn } from "../types";
 
 interface Metrics {
   dead_jobs: number;
@@ -28,16 +14,32 @@ interface Metrics {
   webhook_failures: number;
 }
 
+const STAGES: { key: string; label: string; tone: string }[] = [
+  { key: "ingested", label: "Ingested", tone: "ink" },
+  { key: "frames_extracted", label: "Frames out", tone: "ink" },
+  { key: "ai_reviewed", label: "AI reviewed", tone: "accent" },
+  { key: "human_reviewed", label: "Human reviewed", tone: "amber" },
+  { key: "done", label: "Done", tone: "green" },
+  { key: "failed", label: "Failed", tone: "red" },
+];
+
 export function DashboardScreen({ t, sub, onOpenReview }: { t: TFn; sub: string | null; onOpenReview: (id: string) => void }) {
   const [threshold, setThreshold] = useState(2);
   const [client, setClient] = useState("all");
-  const metrics = useLive<Metrics | null>(() => api.adminMetrics(), null);
+  const board = useLive<BoardVideo[]>(() => api.boardVideos(), []);
 
   if (sub === "videos") return <VideosView t={t} onOpenReview={onOpenReview} />;
   if (sub === "jobs") return <JobsView t={t} />;
 
-  const disc = D.DISCREPANCY.filter((d) => d.gap >= threshold && (client === "all" || d.client.id === client));
-  const pipeline = D.PIPELINE.map((p) => (p.key === "failed" && metrics.live && metrics.data ? { ...p, count: metrics.data.dead_jobs } : p));
+  const videos = board.data;
+  const pipeline = STAGES.map((s) => ({ ...s, count: videos.filter((v) => v.status === s.key).length }));
+  const clientOpts = [
+    { v: "all", l: t("common.all") },
+    ...Array.from(new Map(videos.map((v) => [v.clientId, v.clientObj.name])).entries()).map(([id, name]) => ({ v: id, l: name })),
+  ];
+  const disc = videos
+    .filter((v) => v.gap != null && v.gap >= threshold && (client === "all" || v.clientId === client))
+    .map((v) => ({ ref: v.ref, clientObj: v.clientObj, ai: v.aiGrade, human: v.humanGrade, gap: v.gap as number, model: v.aiModel || "—" }));
 
   return (
     <div style={{ height: "100%", overflow: "auto", background: "var(--bg)" }}>
@@ -48,8 +50,7 @@ export function DashboardScreen({ t, sub, onOpenReview }: { t: TFn; sub: string 
             <h1 style={{ fontSize: 26, letterSpacing: "-0.02em" }}>{t("dash.title")}</h1>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <Select value={client} onChange={setClient} options={[{ v: "all", l: t("common.all") }, ...D.CLIENTS.map((c) => ({ v: c.id, l: c.name }))]} icon="filter" />
-            <Select value="jun" onChange={() => {}} options={[{ v: "jun", l: "Jun 2026" }, { v: "may", l: "May 2026" }]} icon="clock" />
+            <Select value={client} onChange={setClient} options={clientOpts} icon="filter" />
           </div>
         </div>
 
@@ -97,13 +98,13 @@ export function DashboardScreen({ t, sub, onOpenReview }: { t: TFn; sub: string 
                 disc.map((d, i) => (
                   <Row key={d.ref} cols="1.1fr 1.2fr 60px 64px 56px 1fr" last={i === disc.length - 1}>
                     <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{d.ref}</span>
-                    <ClientChip client={d.client} />
+                    <ClientChip client={d.clientObj} />
                     <span style={{ textAlign: "right" }}><Grade value={d.ai} size={12.5} muted /></span>
                     <span style={{ textAlign: "right" }}><Grade value={d.human} size={12.5} muted /></span>
                     <span style={{ textAlign: "right" }} className="mono tnum">
                       <span style={{ fontWeight: 700, color: d.gap >= 3 ? "var(--red)" : "var(--amber)", fontSize: 13 }}>{d.gap.toFixed(1)}</span>
                     </span>
-                    <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>{d.model} · {d.prompt}</span>
+                    <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>{d.model}</span>
                   </Row>
                 ))
               )}
@@ -114,48 +115,15 @@ export function DashboardScreen({ t, sub, onOpenReview }: { t: TFn; sub: string 
           </Block>
 
           <Block title={t("dash.cost")} icon="dollar">
-            <div className="panel" style={{ overflow: "hidden" }}>
-              {D.COST.map((c, i) => (
-                <div key={c.client} style={{ padding: "11px 14px", borderBottom: i < D.COST.length - 1 ? "1px solid var(--line-2)" : "none" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <ClientChip client={c.clientObj} />
-                    <span className="mono tnum" style={{ fontWeight: 600, fontSize: 14 }}>${c.cost.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 7 }}>
-                    <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>{c.videos} {t("dash.videos")} · {(c.tokens / 1e6).toFixed(2)}M {t("dash.tokens")}</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span className="mono" style={{ fontSize: 10, color: "var(--ink-4)" }}>{t("dash.percost")}</span>
-                      <Spark data={c.trend} tone={c.trend[c.trend.length - 1] < c.trend[0] ? "var(--green)" : "var(--red)"} />
-                    </div>
-                  </div>
-                </div>
-              ))}
-              <div style={{ padding: "11px 14px", background: "var(--panel-2)", display: "flex", justifyContent: "space-between" }}>
-                <span className="label" style={{ alignSelf: "center" }}>Total MTD</span>
-                <span className="mono tnum" style={{ fontWeight: 700, fontSize: 15 }}>${D.COST.reduce((s, c) => s + c.cost, 0).toFixed(2)}</span>
-              </div>
+            <div className="panel">
+              <EmptyInline icon="dollar" msg="Per-client cost rollup has no API endpoint yet." />
             </div>
           </Block>
         </div>
 
         <Block title={t("dash.through")} icon="user">
-          <div className="panel" style={{ overflow: "hidden" }}>
-            <Row head cols="1.4fr 1fr 1fr 1.2fr 1.2fr">
-              {["Reviewer", `Reviews ${t("dash.perday")}`, t("dash.avgmin"), t("dash.override"), t("dash.qa")].map((h, i) => (
-                <span key={i} className="label">{h}</span>
-              ))}
-            </Row>
-            {D.THROUGHPUT.map((r, i) => (
-              <Row key={r.r} cols="1.4fr 1fr 1fr 1.2fr 1.2fr" last={i === D.THROUGHPUT.length - 1}>
-                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <Avatar initials={r.reviewer.initials} /> <span style={{ fontSize: 13 }}>{r.reviewer.name}</span>
-                </span>
-                <span className="mono tnum" style={{ fontWeight: 600 }}>{r.perDay}</span>
-                <span className="mono tnum" style={{ color: "var(--ink-2)" }}>{r.avgMin.toFixed(1)}</span>
-                <BarCell v={r.overrideRate} max={0.3} tone="var(--amber)" fmt={(x) => Math.round(x * 100) + "%"} />
-                <BarCell v={r.qaAgree} max={1} tone="var(--green)" fmt={(x) => Math.round(x * 100) + "%"} />
-              </Row>
-            ))}
+          <div className="panel">
+            <EmptyInline icon="user" msg="Reviewer throughput has no API endpoint yet." />
           </div>
         </Block>
       </div>
@@ -177,6 +145,16 @@ function Block({ title, icon, aside, children }: { title: string; icon: string; 
   );
 }
 
+// Map raw VideoStatus -> StatusPill key.
+const PILL_FOR: Record<string, string> = {
+  done: "done",
+  human_reviewed: "done",
+  ai_reviewed: "ai_graded",
+  frames_extracted: "processing",
+  ingested: "processing",
+  failed: "failed",
+};
+
 function StatusPill({ status, t }: { status: string; t: TFn }) {
   const map: Record<string, { l: string; c: string; bg: string }> = {
     done: { l: t("portal.reviewed"), c: "var(--green)", bg: "var(--green-bg)" },
@@ -195,9 +173,8 @@ function StatusPill({ status, t }: { status: string; t: TFn }) {
 
 function VideosView({ t, onOpenReview }: { t: TFn; onOpenReview: (id: string) => void }) {
   const [q, setQ] = useState("");
-  const all = D.QUEUE.concat(D.QUEUE.map((v) => ({ ...v, id: v.ref + "-b", ref: v.ref.replace("EGO-248", "EGO-247") })));
-  const rows = all.filter((v) => v.ref.toLowerCase().includes(q.toLowerCase()) || v.client.name.toLowerCase().includes(q.toLowerCase()));
-  const statusFor = (i: number) => ["done", "in_review", "done", "ai_graded", "done", "in_review"][i % 6];
+  const board = useLive<BoardVideo[]>(() => api.boardVideos(), []);
+  const rows = board.data.filter((v) => v.ref.toLowerCase().includes(q.toLowerCase()) || v.clientObj.name.toLowerCase().includes(q.toLowerCase()));
   return (
     <div style={{ height: "100%", overflow: "auto", background: "var(--bg)" }}>
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: "24px 28px 60px" }}>
@@ -214,13 +191,15 @@ function VideosView({ t, onOpenReview }: { t: TFn; onOpenReview: (id: string) =>
               <span key={i} className="label" style={{ textAlign: i === 5 ? "right" : "left" }}>{h}</span>
             ))}
           </Row>
-          {rows.map((v, i) => (
-            <Row key={v.id} cols="50px 1.1fr 1.3fr 90px 110px 80px 80px" last={i === rows.length - 1} onClick={() => onOpenReview(v.ref.replace("-b", "").replace("EGO-247", "EGO-248"))}>
+          {rows.length === 0 ? (
+            <EmptyInline icon="film" msg="No videos yet — register a source or run the demo." />
+          ) : rows.map((v, i) => (
+            <Row key={v.id} cols="50px 1.1fr 1.3fr 90px 110px 80px 80px" last={i === rows.length - 1} onClick={() => onOpenReview(v.id)}>
               <FrameThumb frame={{ hue: sceneOf(v.scene).hue }} style={{ width: 40, height: 24 }} showHud={false} />
               <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{v.ref}</span>
-              <ClientChip client={v.client} />
-              <span className="mono" style={{ fontSize: 11, color: "var(--ink-2)" }}>{v.sceneLabel}</span>
-              <StatusPill status={statusFor(i)} t={t} />
+              <ClientChip client={v.clientObj} />
+              <span className="mono" style={{ fontSize: 11, color: "var(--ink-2)" }}>{sceneOf(v.scene).label}</span>
+              <StatusPill status={PILL_FOR[v.status] || "processing"} t={t} />
               <span style={{ textAlign: "right" }}><Grade value={v.aiGrade} size={12.5} /></span>
               <span style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end", color: "var(--ink-3)", fontSize: 11 }}>
                 <Ico name="eye" size={13} /> view
@@ -234,50 +213,34 @@ function VideosView({ t, onOpenReview }: { t: TFn; onOpenReview: (id: string) =>
 }
 
 function JobsView({ t }: { t: TFn }) {
-  const [jobs, setJobs] = useState(D.JOBS);
-  const [retrying, setRetrying] = useState<string | null>(null);
-  function retry(id: string) {
-    setRetrying(id);
-    setTimeout(() => {
-      setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, status: "running", attempts: j.attempts + 1, lastError: "" } : j)));
-      setRetrying(null);
-    }, 900);
-  }
-  const tones: Record<string, string> = { failed: "var(--red)", dead: "var(--red)", running: "var(--accent)" };
+  // No job-list endpoint exists; surface the live queue-health counts instead.
+  const metrics = useLive<Metrics | null>(() => api.adminMetrics(), null);
+  const m = metrics.data;
+  const cards: { label: string; value: number; tone: string }[] = [
+    { label: "Queued", value: m?.queue_depth ?? 0, tone: "var(--ink)" },
+    { label: "Running", value: m?.running_jobs ?? 0, tone: "var(--accent)" },
+    { label: "Dead", value: m?.dead_jobs ?? 0, tone: "var(--red)" },
+    { label: "Webhook failures", value: m?.webhook_failures ?? 0, tone: "var(--amber)" },
+  ];
   return (
     <div style={{ height: "100%", overflow: "auto", background: "var(--bg)" }}>
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "24px 28px 60px" }}>
         <div style={{ marginBottom: 18 }}>
           <div className="label" style={{ marginBottom: 6 }}>{t("role.admin")}</div>
           <h1 style={{ fontSize: 24, letterSpacing: "-0.02em" }}>{t("nav.jobs")}</h1>
-          <p style={{ color: "var(--ink-3)", fontSize: 13, marginTop: 4 }}>Processing pipeline — failed &amp; dead jobs need attention.</p>
+          <p style={{ color: "var(--ink-3)", fontSize: 13, marginTop: 4 }}>Processing-queue health from <span className="mono">/admin/metrics</span>.</p>
         </div>
-        <div className="panel" style={{ overflow: "hidden" }}>
-          <Row head cols="90px 1fr 1fr 1.6fr 60px 80px 92px">
-            {["Job", t("queue.ref"), "Stage", "Last error", "Try", "Status", ""].map((h, i) => (
-              <span key={i} className="label">{h}</span>
-            ))}
-          </Row>
-          {jobs.map((j, i) => (
-            <Row key={j.id} cols="90px 1fr 1fr 1.6fr 60px 80px 92px" last={i === jobs.length - 1}>
-              <span className="mono" style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{j.id}</span>
-              <span className="mono" style={{ fontSize: 12.5, fontWeight: 600 }}>{j.ref}</span>
-              <span className="mono" style={{ fontSize: 11.5, color: "var(--ink-2)" }}>{j.stage}</span>
-              <span style={{ fontSize: 11.5, color: j.lastError ? "var(--red)" : "var(--ink-4)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: j.lastError ? '"IBM Plex Mono", monospace' : "inherit" }}>{j.lastError || "—"}</span>
-              <span className="mono tnum" style={{ fontSize: 12, color: j.attempts >= 5 ? "var(--red)" : "var(--ink-2)" }}>{j.attempts}×</span>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 600, color: tones[j.status], textTransform: "capitalize" }}>
-                <span style={{ width: 6, height: 6, borderRadius: 99, background: tones[j.status] }} className={j.status === "running" ? "rec-dot" : ""} />{j.status}
-              </span>
-              <span style={{ textAlign: "right" }}>
-                {(j.status === "failed" || j.status === "dead") && (
-                  <Btn kind="default" size="sm" icon="refresh" onClick={() => retry(j.id)} disabled={retrying === j.id}>
-                    {retrying === j.id ? "…" : t("common.retry")}
-                  </Btn>
-                )}
-              </span>
-            </Row>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 1, background: "var(--line)", border: "1px solid var(--line)", borderRadius: 6, overflow: "hidden" }}>
+          {cards.map((c) => (
+            <div key={c.label} style={{ background: "var(--panel)", padding: "16px 16px 18px" }}>
+              <div className="mono tnum" style={{ fontSize: 30, fontWeight: 600, color: c.tone, lineHeight: 1 }}>{c.value}</div>
+              <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 7 }}>{c.label}</div>
+            </div>
           ))}
         </div>
+        <p style={{ fontSize: 11.5, color: "var(--ink-4)", marginTop: 12, display: "flex", alignItems: "center", gap: 6 }}>
+          <Ico name="layers" size={12} /> A per-job list (with retry) needs a jobs API endpoint — not built yet.
+        </p>
       </div>
     </div>
   );

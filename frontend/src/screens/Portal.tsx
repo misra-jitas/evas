@@ -8,7 +8,7 @@ import { D, sceneOf } from "../data";
 import type { Client, PortalVideo, TFn } from "../types";
 
 export function PortalScreen({ t, sub, portalClient }: { t: TFn; sub: string | null; portalClient: Client }) {
-  const live = useLive<PortalVideo[]>(() => api.portalVideos(), D.PORTAL_VIDEOS);
+  const live = useLive<PortalVideo[]>(() => api.portalVideos(), []);
   const [openRef, setOpenRef] = useState<string | null>(null);
 
   if (sub === "exports") return <ExportsView t={t} client={portalClient} />;

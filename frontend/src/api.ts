@@ -5,7 +5,7 @@
 // renders against an empty or unauthenticated backend during development.
 import { useEffect, useState } from "react";
 import { D, sceneOf } from "./data";
-import type { AiRun, Client, PortalVideo, Source } from "./types";
+import type { AiRunDetail, AiStatGroup, AiStats, BoardVideo, AiRun, Client, Frame, FrameItem, PortalVideo, Source } from "./types";
 
 const BASE: string = (import.meta.env.VITE_EVAS_API_BASE as string) || "/api";
 const BOOTSTRAP: string = (import.meta.env.VITE_EVAS_BOOTSTRAP_TOKEN as string) || "";
@@ -188,6 +188,133 @@ function adaptPortalVideo(r: RawPortalVideo): PortalVideo {
   };
 }
 
+// ---- board videos (GET /videos) ----
+interface RawBoard {
+  id: string;
+  client_id: string;
+  external_ref: string | null;
+  status: string;
+  priority: string;
+  ai_grade: number | null;
+  ai_model: string | null;
+  human_grade: number | null;
+  grade_discrepancy: number | null;
+  uploaded_at: string;
+  source_id: string | null;
+}
+function adaptBoard(r: RawBoard): BoardVideo {
+  return {
+    id: r.id,
+    ref: r.external_ref || r.id.slice(0, 8),
+    clientId: r.client_id,
+    clientObj: clientFromId(r.client_id),
+    status: r.status,
+    priority: r.priority,
+    aiGrade: r.ai_grade,
+    aiModel: r.ai_model,
+    humanGrade: r.human_grade,
+    gap: r.grade_discrepancy,
+    scene: sceneFor(r.id),
+    uploaded: r.uploaded_at.slice(0, 10),
+  };
+}
+
+// ---- AI stats (GET /ai/stats) ----
+interface RawStatGroup {
+  key: string;
+  throughput_per_hour: number;
+  avg_cost_usd: number;
+  avg_confidence: number | null;
+  flagged_rate: number;
+  error_rate: number;
+}
+interface RawStats {
+  by_model: RawStatGroup[];
+  by_prompt_version: RawStatGroup[];
+}
+const flat = (v: number): number[] => [v, v];
+function adaptStatGroup(g: RawStatGroup): AiStatGroup {
+  const conf = g.avg_confidence ?? 0;
+  return {
+    key: g.key,
+    videosHr: g.throughput_per_hour,
+    costVideo: g.avg_cost_usd,
+    avgConf: conf,
+    flaggedRate: g.flagged_rate,
+    errRate: g.error_rate,
+    // The live endpoint has no time series, so sparklines render flat (honest).
+    spark: { videosHr: flat(g.throughput_per_hour), costVideo: flat(g.avg_cost_usd), conf: flat(conf), flagged: flat(g.flagged_rate), err: flat(g.error_rate) },
+  };
+}
+function adaptStats(r: RawStats): AiStats {
+  return { byModel: r.by_model.map(adaptStatGroup), byPrompt: r.by_prompt_version.map(adaptStatGroup) };
+}
+
+// ---- run drill-down (GET /ai/runs/{id}) ----
+interface RawDetailFrame {
+  frame_index: number;
+  timecode_label: string;
+  timecode_seconds: number;
+  description: string | null;
+  findings: Record<string, { value: unknown; confidence: number | null }>;
+  flagged: boolean;
+}
+interface RawRunDetail {
+  id: string;
+  video_id: string;
+  external_ref: string | null;
+  client_id: string;
+  model: string;
+  prompt_version: string;
+  status: AiRun["status"];
+  grade: number | null;
+  error: string | null;
+  duration_seconds: number | null;
+  cost: { tokens_in: number; tokens_out: number; cost_usd: number; cost_per_frame: number | null };
+  issues: { flagged_count: number };
+  frames: RawDetailFrame[];
+}
+const yesNo = (v: unknown): string => (v === true || v === "Yes" || v === "yes" ? "Yes" : "No");
+function adaptRunDetail(r: RawRunDetail): AiRunDetail {
+  const scene = sceneFor(r.video_id);
+  const frames: Frame[] = r.frames.map((f) => {
+    const items: FrameItem[] = Object.entries(f.findings || {}).map(([key, val]) => ({
+      key,
+      label: key,
+      expect: "",
+      risk: false,
+      aiValue: yesNo(val?.value),
+      conf: val?.confidence ?? 0,
+      state: "pending",
+    }));
+    return { id: `fr-${f.frame_index}`, idx: f.frame_index, t: f.timecode_seconds, timecode: f.timecode_label, scene, hue: sceneOf(scene).hue, flagged: f.flagged, touched: false, note: "", desc: f.description || "", items };
+  });
+  return {
+    id: r.id,
+    ref: r.external_ref || r.video_id.slice(0, 8),
+    client: r.client_id,
+    clientObj: clientFromId(r.client_id),
+    scene,
+    sceneLabel: sceneOf(scene).label,
+    model: r.model,
+    prompt: r.prompt_version,
+    status: r.status,
+    done: frames.length,
+    total: frames.length,
+    grade: r.grade,
+    flagged: r.issues?.flagged_count ?? 0,
+    tokIn: r.cost.tokens_in,
+    tokOut: r.cost.tokens_out,
+    tokens: r.cost.tokens_in + r.cost.tokens_out,
+    cost: r.cost.cost_usd,
+    dur: r.duration_seconds,
+    started: 0,
+    error: r.error || undefined,
+    frames,
+    allCount: frames.length,
+  };
+}
+
 export interface ClientRecord {
   id: string;
   name: string;
@@ -227,7 +354,9 @@ export const api = {
   }) => request<RawSource>("/sources", jsonInit("POST", body)).then(adaptSource),
   syncSource: (id: string) => request(`/sources/${id}/sync`, { method: "POST" }),
   listRuns: (qs = "") => request<RawRun[]>(`/ai/runs${qs}`).then((rows) => rows.map(adaptRun)),
-  runStats: () => request<unknown>("/ai/stats"),
+  runStats: () => request<RawStats>("/ai/stats").then(adaptStats),
+  runDetail: (id: string) => request<RawRunDetail>(`/ai/runs/${id}`).then(adaptRunDetail),
+  boardVideos: () => request<RawBoard[]>("/videos").then((rows) => rows.map(adaptBoard)),
   rerun: (id: string) => request(`/ai/runs/${id}/rerun`, { method: "POST" }),
   adminMetrics: () =>
     request<{ dead_jobs: number; queue_depth: number; running_jobs: number; webhook_failures: number }>(

@@ -21,8 +21,8 @@ import {
   StatusBadge,
   Tag,
 } from "../components";
-import { D, sceneOf } from "../data";
-import type { AiRun, AiStatGroup, TFn } from "../types";
+import { sceneOf } from "../data";
+import type { AiRun, AiRunDetail, AiStatGroup, AiStats, TFn } from "../types";
 
 export function AIReviewScreen({
   t,
@@ -37,7 +37,9 @@ export function AIReviewScreen({
   onOpen: (screen: "aireview" | "run", id?: string) => void;
   onOpenDiscrepancy: () => void;
 }) {
-  const live = useLive<AiRun[]>(() => api.listRuns(), D.AI_RUNS);
+  const live = useLive<AiRun[]>(() => api.listRuns(), []);
+  const statsLive = useLive<AiStats>(() => api.runStats(), { byModel: [], byPrompt: [] });
+  const metricsLive = useLive<{ queue_depth: number } | null>(() => api.adminMetrics(), null);
   const [runs, setRuns] = useState<AiRun[]>(live.data);
   const [groupBy, setGroupBy] = useState("model");
   const [fStatus, setFStatus] = useState("all");
@@ -72,7 +74,7 @@ export function AIReviewScreen({
     (r) => (fStatus === "all" || r.status === fStatus) && (fClient === "all" || r.client === fClient) && (!hasIssues || r.status === "failed" || r.flagged >= 4),
   );
 
-  const stats = groupBy === "model" ? D.AI_STATS.byModel : D.AI_STATS.byPrompt;
+  const stats = groupBy === "model" ? statsLive.data.byModel : statsLive.data.byPrompt;
 
   function rerun(r: AiRun) {
     api.rerun(r.id).catch(() => {});
@@ -90,7 +92,7 @@ export function AIReviewScreen({
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
           <PulseCard label={t("ai.inprogress")} icon="pulse" tone="var(--accent)" live value={running.length} unit={t("ai.running")} sub={`${runningFrames.toLocaleString()} ${t("ai.frames")}`} />
-          <PulseCard label={t("ai.queued")} icon="clock" tone="var(--ink-2)" value={D.AI_QUEUED} unit="ai_review jobs" sub="waiting to start" />
+          <PulseCard label={t("ai.queued")} icon="clock" tone="var(--ink-2)" value={metricsLive.data?.queue_depth ?? 0} unit="jobs queued" sub="waiting to start" />
           <PulseCard label={t("ai.donetoday")} icon="check" tone="var(--green)" value={doneToday} unit="runs" sub={`${doneToday} videos graded`} />
           <PulseCard label={t("ai.issues")} icon="alert" tone={issues > 0 ? "var(--red)" : "var(--ink-3)"} value={issues} unit="failed" sub={issues > 0 ? "click to filter" : "all healthy"} alarm={issues > 0} onClick={issues > 0 ? () => { setFStatus("failed"); setHasIssues(false); } : undefined} />
         </div>
@@ -122,7 +124,7 @@ export function AIReviewScreen({
           </h2>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <Select value={fStatus} onChange={setFStatus} icon="filter" options={[{ v: "all", l: "All status" }, { v: "running", l: "Running" }, { v: "completed", l: "Completed" }, { v: "failed", l: "Failed" }]} />
-            <Select value={fClient} onChange={setFClient} options={[{ v: "all", l: t("common.all") }, ...D.CLIENTS.map((c) => ({ v: c.id, l: c.name }))]} />
+            <Select value={fClient} onChange={setFClient} options={[{ v: "all", l: t("common.all") }, ...Array.from(new Map(runs.map((r) => [r.client, r.clientObj.name])).entries()).map(([id, name]) => ({ v: id, l: name }))]} />
             <button onClick={() => setHasIssues((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 11px", borderRadius: 4, fontSize: 12.5, fontWeight: 550, border: `1px solid ${hasIssues ? "var(--red)" : "var(--line-strong)"}`, background: hasIssues ? "var(--red-bg)" : "var(--panel)", color: hasIssues ? "var(--red)" : "var(--ink-2)" }}>
               <Ico name="alert" size={14} /> {t("ai.hasissues")}
             </button>
@@ -135,7 +137,7 @@ export function AIReviewScreen({
             ))}
           </Row>
           {rows.length === 0 ? (
-            <EmptyInline icon="cpu" msg="No runs match these filters" />
+            <EmptyInline icon="cpu" msg={runs.length === 0 ? "No AI runs yet — they appear as videos are reviewed." : "No runs match these filters"} />
           ) : (
             rows.map((r, i) => <RunRow key={r.id} r={r} t={t} last={i === rows.length - 1} onClick={() => onOpen("run", r.id)} onRerun={() => rerun(r)} />)
           )}
@@ -241,10 +243,28 @@ function RunRow({ r, t, last, onClick, onRerun }: { r: AiRun; t: TFn; last: bool
 }
 
 function RunDetail({ t, runId, onBack, onOpenDiscrepancy }: { t: TFn; runId: string; onBack: () => void; onOpenDiscrepancy: () => void }) {
-  const run = useMemo(() => D.getRun(runId), [runId]);
-  const [selFrame, setSelFrame] = useState<string | null>(run.frames[0] ? run.frames[0].id : null);
+  const detail = useLive<AiRunDetail | null>(() => api.runDetail(runId), null, [runId]);
+  const run = detail.data;
+  const [selFrame, setSelFrame] = useState<string | null>(null);
+  useEffect(() => {
+    if (run && run.frames[0]) setSelFrame((cur) => cur ?? run.frames[0].id);
+  }, [run]);
+
+  if (!run) {
+    return (
+      <div style={{ height: "100%", overflow: "auto", background: "var(--bg)" }}>
+        <div style={{ maxWidth: 1180, margin: "0 auto", padding: "24px 28px" }}>
+          <Btn kind="ghost" size="sm" icon="arrowL" onClick={onBack} style={{ marginBottom: 14, marginLeft: -6 }}>{t("ai.title")}</Btn>
+          <div className="panel" style={{ padding: 40, textAlign: "center", color: "var(--ink-4)" }}>
+            {detail.loading ? t("common.loading") + "…" : "Run not found."}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const scene = sceneOf(run.scene);
-  const selected = run.frames.find((f) => f.id === selFrame);
+  const selected = run.frames.find((f) => f.id === selFrame) || run.frames[0];
 
   const humanGrade = run.grade != null ? Math.round((run.grade + (Math.random() > 0.5 ? -2 : 1.5)) * 2) / 2 : null;
   const gap = humanGrade != null && run.grade != null ? Math.abs(run.grade - humanGrade) : null;

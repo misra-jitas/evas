@@ -124,6 +124,14 @@ function TopBar({ t, role, route, setRoute, theme, setTheme, lang, setLang, onSi
 
 const inputStyle: React.CSSProperties = { padding: "9px 11px", borderRadius: 5, border: "1px solid var(--line-strong)", background: "var(--panel-2)", fontSize: 13, outline: "none" };
 
+// Seeded demo accounts (see `evas create-user`). Each role logs in as the
+// matching user so its JWT carries the right role for the live API.
+const DEMO_EMAIL: Record<Role, string> = {
+  reviewer: "elena.park@evas.io",
+  admin: "admin@evas.io",
+  client: "viewer@halo.io",
+};
+
 function Login({ t, onLogin, theme, setTheme }: { t: TFn; onLogin: (role: Role, email: string) => void; theme: Theme; setTheme: (t: Theme) => void }) {
   const roles: { k: Role; icon: string; title: string; desc: string }[] = [
     { k: "reviewer", icon: "list", title: t("role.reviewer"), desc: "Clear assigned videos, keyboard-first." },
@@ -131,7 +139,13 @@ function Login({ t, onLogin, theme, setTheme }: { t: TFn; onLogin: (role: Role, 
     { k: "client", icon: "film", title: t("role.client"), desc: "Read-only results for your videos." },
   ];
   const [hover, setHover] = useState<Role>("reviewer");
-  const [email, setEmail] = useState("elena.park@evas.io");
+  const [email, setEmail] = useState(DEMO_EMAIL.reviewer);
+  const [edited, setEdited] = useState(false);
+  // Until the user edits the field, it tracks the hovered role's demo account.
+  function hoverRole(r: Role) {
+    setHover(r);
+    if (!edited) setEmail(DEMO_EMAIL[r]);
+  }
   return (
     <div className="grid-tex" style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
       <div style={{ position: "absolute", top: 16, right: 16 }}><ThemeToggle theme={theme} setTheme={setTheme} /></div>
@@ -144,7 +158,7 @@ function Login({ t, onLogin, theme, setTheme }: { t: TFn; onLogin: (role: Role, 
           <div style={{ display: "flex", flexDirection: "column", gap: 11, marginBottom: 18 }}>
             <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               <span className="label">{t("login.email")}</span>
-              <input value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} />
+              <input value={email} onChange={(e) => { setEmail(e.target.value); setEdited(true); }} style={inputStyle} />
             </label>
             <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               <span className="label">{t("login.pass")}</span>
@@ -154,7 +168,7 @@ function Login({ t, onLogin, theme, setTheme }: { t: TFn; onLogin: (role: Role, 
           <div className="label" style={{ marginBottom: 9 }}>{t("login.as")}</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
             {roles.map((r) => (
-              <button key={r.k} onClick={() => onLogin(r.k, email)} onMouseEnter={() => setHover(r.k)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 13px", borderRadius: 6, border: `1px solid ${hover === r.k ? "var(--accent)" : "var(--line-strong)"}`, textAlign: "left", background: hover === r.k ? "var(--accent-2)" : "var(--panel)", transition: "all .12s" }}>
+              <button key={r.k} onClick={() => onLogin(r.k, edited ? email : DEMO_EMAIL[r.k])} onMouseEnter={() => hoverRole(r.k)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 13px", borderRadius: 6, border: `1px solid ${hover === r.k ? "var(--accent)" : "var(--line-strong)"}`, textAlign: "left", background: hover === r.k ? "var(--accent-2)" : "var(--panel)", transition: "all .12s" }}>
                 <span style={{ width: 32, height: 32, borderRadius: 6, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: hover === r.k ? "var(--accent)" : "var(--panel-3)", color: hover === r.k ? "var(--accent-ink)" : "var(--ink-2)" }}>
                   <Ico name={r.icon} size={17} />
                 </span>
@@ -226,9 +240,17 @@ export function App() {
     });
   }
 
-  function login(r: Role, email: string) {
-    // Best-effort live token: only attempts when a bootstrap token is configured.
-    if (BOOTSTRAP_CONFIGURED && email) apiLogin(email).catch(() => {});
+  async function login(r: Role, email: string) {
+    // Mint the JWT BEFORE routing so the first screen's fetch is authenticated
+    // (otherwise it races the token and 401s into the mock fallback). Best-effort:
+    // only when a bootstrap token is configured; failures fall back to mock.
+    if (BOOTSTRAP_CONFIGURED && email) {
+      try {
+        await apiLogin(email);
+      } catch {
+        /* offline / unknown user — proceed with mock data */
+      }
+    }
     setRole(r);
     setRoute({ screen: r === "reviewer" ? "queue" : r === "admin" ? "sources" : "portal" });
   }
