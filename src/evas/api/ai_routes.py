@@ -75,6 +75,7 @@ def list_runs(
             flagged.label("flagged_frames"),
         )
         .join(Video, Video.id == AiRun.video_id)
+        .where(Video.deleted_at.is_(None))
         .order_by(AiRun.created_at.desc())
     )
     if status is not None:
@@ -132,6 +133,9 @@ def stats(
     start = date_from or (end - datetime.timedelta(days=7))
     hours = max((end - start).total_seconds() / 3600.0, 1e-9)
 
+    # Only count runs whose video is still live (soft-deleted videos drop out).
+    live_videos = select(Video.id).where(Video.deleted_at.is_(None)).scalar_subquery()
+
     def _by(group_col: Any) -> list[dict[str, Any]]:
         cols: list[Any] = [group_col] if group_col is not None else []
         run_rows = session.execute(
@@ -144,7 +148,9 @@ def stats(
                     func.avg(AiRun.cost_usd).filter(AiRun.status == RunStatus.completed), 0
                 ).label("avg_cost"),
             )
-            .where(AiRun.created_at >= start, AiRun.created_at < end)
+            .where(
+                AiRun.created_at >= start, AiRun.created_at < end, AiRun.video_id.in_(live_videos)
+            )
             .group_by(*cols)
         ).all()
         # Confidence / flagged come from findings joined back to runs in range.
@@ -157,7 +163,9 @@ def stats(
             )
             .select_from(AiFrameFinding)
             .join(AiRun, AiRun.id == AiFrameFinding.ai_run_id)
-            .where(AiRun.created_at >= start, AiRun.created_at < end)
+            .where(
+                AiRun.created_at >= start, AiRun.created_at < end, AiRun.video_id.in_(live_videos)
+            )
             .group_by(*cols)
         ).all()
 

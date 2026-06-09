@@ -74,9 +74,25 @@ export function tintFor(id: string): string {
 export function sceneFor(id: string): string {
   return D.SCENES[hash(id) % D.SCENES.length].id;
 }
+// Resolved client names, populated whenever /clients is fetched. Lets the board
+// and run adapters (which only carry client_id) show real names, not UUIDs.
+const clientNames = new Map<string, string>();
 function clientFromId(id: string, name?: string): Client {
-  const short = (name || id).replace(/[^A-Za-z]/g, "").slice(0, 4).toUpperCase() || "EVAS";
-  return { id, name: name || id, short, tint: tintFor(id) };
+  const resolved = name || clientNames.get(id) || id;
+  const short = resolved.replace(/[^A-Za-z]/g, "").slice(0, 4).toUpperCase() || "EVAS";
+  return { id, name: resolved, short, tint: tintFor(id) };
+}
+// Fetch /clients once and cache id->name so name resolution works across screens.
+let clientsWarm: Promise<void> | null = null;
+function warmClients(): Promise<void> {
+  if (!clientsWarm) {
+    clientsWarm = request<ClientRecord[]>("/clients")
+      .then((rows) => {
+        rows.forEach((c) => clientNames.set(c.id, c.name));
+      })
+      .catch(() => {});
+  }
+  return clientsWarm;
 }
 
 // ---- raw response types (subset of fields we consume) ----
@@ -338,12 +354,19 @@ function jsonInit(method: string, body: unknown): RequestInit {
 
 // ---- typed endpoint calls ----
 export const api = {
-  listClients: () => request<ClientRecord[]>("/clients"),
+  listClients: () =>
+    request<ClientRecord[]>("/clients").then((rows) => {
+      rows.forEach((c) => clientNames.set(c.id, c.name));
+      return rows;
+    }),
   createClient: (body: ClientInput) => request<ClientRecord>("/clients", jsonInit("POST", body)),
   updateClient: (id: string, body: Partial<ClientInput>) =>
     request<ClientRecord>(`/clients/${id}`, jsonInit("PATCH", body)),
   deleteClient: (id: string) => request(`/clients/${id}`, { method: "DELETE" }),
-  listSources: () => request<RawSource[]>("/sources").then((rows) => rows.map(adaptSource)),
+  listSources: () =>
+    warmClients()
+      .then(() => request<RawSource[]>("/sources"))
+      .then((rows) => rows.map(adaptSource)),
   createSource: (body: {
     client_id: string;
     label: string;
@@ -352,11 +375,25 @@ export const api = {
     credential_ref?: string | null;
     auto_sync?: boolean;
   }) => request<RawSource>("/sources", jsonInit("POST", body)).then(adaptSource),
+  updateSource: (
+    id: string,
+    body: { label?: string; credential_ref?: string | null; auto_sync?: boolean; enabled?: boolean },
+  ) => request<RawSource>(`/sources/${id}`, jsonInit("PATCH", body)).then(adaptSource),
+  deleteSource: (id: string) => request(`/sources/${id}`, { method: "DELETE" }),
   syncSource: (id: string) => request(`/sources/${id}/sync`, { method: "POST" }),
-  listRuns: (qs = "") => request<RawRun[]>(`/ai/runs${qs}`).then((rows) => rows.map(adaptRun)),
+  listRuns: (qs = "") =>
+    warmClients()
+      .then(() => request<RawRun[]>(`/ai/runs${qs}`))
+      .then((rows) => rows.map(adaptRun)),
   runStats: () => request<RawStats>("/ai/stats").then(adaptStats),
-  runDetail: (id: string) => request<RawRunDetail>(`/ai/runs/${id}`).then(adaptRunDetail),
-  boardVideos: () => request<RawBoard[]>("/videos").then((rows) => rows.map(adaptBoard)),
+  runDetail: (id: string) =>
+    warmClients()
+      .then(() => request<RawRunDetail>(`/ai/runs/${id}`))
+      .then(adaptRunDetail),
+  boardVideos: (sourceId?: string) =>
+    warmClients()
+      .then(() => request<RawBoard[]>(`/videos${sourceId ? `?source_id=${sourceId}` : ""}`))
+      .then((rows) => rows.map(adaptBoard)),
   rerun: (id: string) => request(`/ai/runs/${id}/rerun`, { method: "POST" }),
   adminMetrics: () =>
     request<{ dead_jobs: number; queue_depth: number; running_jobs: number; webhook_failures: number }>(

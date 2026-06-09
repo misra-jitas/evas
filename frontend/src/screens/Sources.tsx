@@ -24,7 +24,17 @@ import {
 } from "../components";
 import { D, sceneOf } from "../data";
 import type { SelectOption } from "../components";
-import type { Source, TFn } from "../types";
+import type { BoardVideo, Source, TFn } from "../types";
+
+// Raw VideoStatus -> StatusBadge token key.
+const VIDEO_PILL: Record<string, string> = {
+  done: "reviewed",
+  human_reviewed: "reviewed",
+  ai_reviewed: "ai_graded",
+  frames_extracted: "processing",
+  ingested: "processing",
+  failed: "failed",
+};
 
 function ago(m: number): string {
   if (m === 0) return "just now";
@@ -49,6 +59,8 @@ export function SourcesScreen({
   const live = useLive<Source[]>(() => api.listSources(), []);
   const [sources, setSources] = useState<Source[]>(live.data);
   const [showReg, setShowReg] = useState(false);
+  const [editing, setEditing] = useState<Source | null>(null);
+  const [deleting, setDeleting] = useState<Source | null>(null);
   const [syncing, setSyncing] = useState<Record<string, boolean>>({});
   // Live clients for the register modal's picker (falls back to mock clients).
   const clientsLive = useLive<SelectOption[]>(
@@ -91,22 +103,43 @@ export function SourcesScreen({
     };
     setSources((prev) => [ns, ...prev]);
     setShowReg(false);
-    // Persist for real (creates the source + kicks off a sync), then reconcile.
+    // Persist for real (creates the source + kicks off a sync), then reconcile
+    // with the server. On failure, surface the error on the optimistic row —
+    // never fabricate discovery counts.
     api
       .createSource({ client_id: form.client, label: form.label, type: form.type, uri_prefix: form.uri, credential_ref: form.cred, auto_sync: form.autoSync })
       .then(() => setTimeout(() => live.reload(), 1800))
-      .catch(() => {
-        // Offline/mock: keep the optimistic row and fake discovery.
-        let n = 0;
-        const iv = setInterval(() => {
-          n += Math.floor(8 + Math.random() * 22);
-          setSources((prev) => prev.map((x) => (x.id === ns.id ? { ...x, total: n, toGo: n } : x)));
-          if (n > 80) {
-            clearInterval(iv);
-            setSources((prev) => prev.map((x) => (x.id === ns.id ? { ...x, status: "connected" } : x)));
-          }
-        }, 500);
+      .catch((e) => {
+        setSources((prev) => prev.map((x) => (x.id === ns.id ? { ...x, status: "error", lastError: String(e?.message || e) } : x)));
       });
+  }
+
+  // Enable/disable a source, then reconcile with the server.
+  function toggleEnabled(s: Source) {
+    const enabled = s.status === "disabled";
+    setSources((prev) => prev.map((x) => (x.id === s.id ? { ...x, status: enabled ? "connected" : "disabled" } : x)));
+    api.updateSource(s.id, { enabled }).then(() => live.reload()).catch(() => live.reload());
+  }
+
+  // Delete a source (soft) after confirmation.
+  function confirmDelete() {
+    const s = deleting;
+    if (!s) return;
+    setDeleting(null);
+    setSources((prev) => prev.filter((x) => x.id !== s.id));
+    api.deleteSource(s.id).then(() => live.reload()).catch(() => live.reload());
+  }
+
+  // Save label/credential/auto-sync edits.
+  function saveEdit(form: { label: string; cred: string; autoSync: boolean }) {
+    const s = editing;
+    if (!s) return;
+    setEditing(null);
+    setSources((prev) => prev.map((x) => (x.id === s.id ? { ...x, label: form.label, cred: form.cred, autoSync: form.autoSync } : x)));
+    api
+      .updateSource(s.id, { label: form.label, credential_ref: form.cred, auto_sync: form.autoSync })
+      .then(() => live.reload())
+      .catch(() => live.reload());
   }
 
   if (sub === "detail" && sourceId) {
@@ -186,7 +219,7 @@ export function SourcesScreen({
                     <Btn kind="default" size="sm" icon="refresh" onClick={() => syncNow(s.id)} disabled={syncing[s.id] || s.status === "disabled"}>
                       {syncing[s.id] ? t("src.syncing") : t("src.syncnow")}
                     </Btn>
-                    <Kebab items={[{ label: "Edit", icon: "sliders" }, { label: s.status === "disabled" ? "Enable" : "Disable", icon: "power" }, { label: "Delete", icon: "x", danger: true }]} />
+                    <Kebab items={[{ label: "Edit", icon: "sliders", onClick: () => setEditing(s) }, { label: s.status === "disabled" ? "Enable" : "Disable", icon: "power", onClick: () => toggleEnabled(s) }, { label: "Delete", icon: "x", danger: true, onClick: () => setDeleting(s) }]} />
                   </div>
                 </div>
                 {s.status === "error" && s.lastError && (
@@ -201,7 +234,53 @@ export function SourcesScreen({
         )}
       </div>
       {showReg && <RegisterModal t={t} clientOptions={clientsLive.data} onClose={() => setShowReg(false)} onSubmit={register} />}
+      {editing && <EditModal t={t} src={editing} onClose={() => setEditing(null)} onSubmit={saveEdit} />}
+      {deleting && (
+        <Modal onClose={() => setDeleting(null)}>
+          <h3 style={{ fontSize: 17, marginBottom: 10 }}>{t("src.delTitle")}</h3>
+          <p style={{ fontSize: 13, color: "var(--ink-2)", lineHeight: 1.55, margin: "0 0 6px" }}>{t("src.delBody")}</p>
+          <p className="mono" style={{ fontSize: 12, color: "var(--ink-3)", margin: 0 }}>{deleting.label}</p>
+          <p style={{ fontSize: 12, color: "var(--ink-4)", lineHeight: 1.5, marginTop: 10 }}>{t("src.delNote")}</p>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--line-2)" }}>
+            <Btn kind="default" onClick={() => setDeleting(null)}>{t("src.cancel")}</Btn>
+            <Btn kind="danger" icon="x" onClick={confirmDelete}>{t("src.delConfirm")}</Btn>
+          </div>
+        </Modal>
+      )}
     </div>
+  );
+}
+
+function EditModal({ t, src, onClose, onSubmit }: { t: TFn; src: Source; onClose: () => void; onSubmit: (f: { label: string; cred: string; autoSync: boolean }) => void }) {
+  const [label, setLabel] = useState(src.label);
+  const [cred, setCred] = useState(src.cred || D.CREDENTIALS[0]);
+  const [autoSync, setAutoSync] = useState(src.autoSync);
+  return (
+    <Modal onClose={onClose} wide>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <h3 style={{ fontSize: 17 }}>{t("src.editTitle")}</h3>
+        <button onClick={onClose} style={{ border: "none", background: "transparent", color: "var(--ink-3)" }}><Ico name="x" size={18} /></button>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 15 }}>
+        <Field label={t("src.uri")}>
+          <input value={src.uri} disabled style={{ ...fieldInput, fontFamily: '"IBM Plex Mono", monospace', color: "var(--ink-3)", background: "var(--panel-3)" }} />
+        </Field>
+        <Field label={t("src.label")}>
+          <input value={label} onChange={(e) => setLabel(e.target.value)} style={fieldInput} />
+        </Field>
+        <Field label={t("src.cred")}>
+          <Select value={cred} onChange={setCred} options={D.CREDENTIALS.map((c) => ({ v: c, l: c }))} full />
+        </Field>
+        <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "2px 0" }}>
+          <Toggle on={autoSync} onChange={() => setAutoSync((v) => !v)} />
+          <span style={{ fontSize: 13 }}>{t("src.autosync")}</span>
+        </label>
+      </div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--line-2)" }}>
+        <Btn kind="default" onClick={onClose}>{t("src.cancel")}</Btn>
+        <Btn kind="primary" icon="check" disabled={label.trim().length < 2} onClick={() => onSubmit({ label, cred, autoSync })}>{t("src.save")}</Btn>
+      </div>
+    </Modal>
   );
 }
 
@@ -274,8 +353,8 @@ function RegisterModal({ t, clientOptions, onClose, onSubmit }: { t: TFn; client
 }
 
 function SourceDetail({ t, src, onBack, onSync, onOpenReview }: { t: TFn; src: Source; onBack: () => void; onSync: () => void; onOpenReview: (id: string) => void }) {
-  const base = D.QUEUE.filter((v) => v.client.id === src.client);
-  const vids = base.concat(base.map((v) => ({ ...v, id: v.ref + "-x", ref: v.ref.replace("248", "247") })));
+  const vidsLive = useLive<BoardVideo[]>(() => api.boardVideos(src.id), [], [src.id]);
+  const vids = vidsLive.data;
   const stats: [string, number, string][] = [
     ["total", src.total, "var(--ink)"],
     ["ingested", src.ingested, "var(--accent)"],
@@ -328,29 +407,26 @@ function SourceDetail({ t, src, onBack, onSync, onOpenReview }: { t: TFn; src: S
           </div>
         )}
 
-        <div className="label" style={{ marginBottom: 10 }}>{t("src.videos")}</div>
-        {src.total === 0 ? (
+        <div className="label" style={{ marginBottom: 10 }}>{t("src.videos")} <span className="mono tnum" style={{ color: "var(--ink-3)", fontWeight: 400 }}>{vids.length}</span></div>
+        {vids.length === 0 ? (
           <EmptyState icon="film" title="No videos discovered yet" sub="Run a sync to enumerate this source." />
         ) : (
           <div className="panel" style={{ overflow: "hidden" }}>
-            <Row head cols="48px 1.1fr 90px 110px 70px 70px">
+            <Row head cols="48px 1.1fr 90px 130px 70px 70px">
               {["", t("queue.ref"), t("queue.scene"), t("portal.status"), "AI", ""].map((h, i) => (
                 <span key={i} className="label" style={{ textAlign: i === 4 ? "right" : "left" }}>{h}</span>
               ))}
             </Row>
-            {vids.slice(0, 8).map((v, i) => {
-              const st = ["reviewed", "in_review", "reviewed", "ai_graded", "reviewed", "processing", "in_review", "reviewed"][i % 8];
-              return (
-                <Row key={v.id} cols="48px 1.1fr 90px 110px 70px 70px" last={i === 7} onClick={() => onOpenReview(v.ref.replace("-x", "").replace("247", "248"))}>
-                  <FrameThumb frame={{ hue: sceneOf(v.scene).hue }} style={{ width: 40, height: 24 }} showHud={false} />
-                  <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{v.ref}</span>
-                  <span className="mono" style={{ fontSize: 11, color: "var(--ink-2)" }}>{v.sceneLabel}</span>
-                  <StatusBadge status={st} size="sm" />
-                  <span style={{ textAlign: "right" }}><Grade value={v.aiGrade} size={12.5} /></span>
-                  <span style={{ textAlign: "right", color: "var(--ink-4)" }}><Ico name="chevR" size={15} /></span>
-                </Row>
-              );
-            })}
+            {vids.map((v, i) => (
+              <Row key={v.id} cols="48px 1.1fr 90px 130px 70px 70px" last={i === vids.length - 1} onClick={() => onOpenReview(v.id)}>
+                <FrameThumb frame={{ hue: sceneOf(v.scene).hue }} style={{ width: 40, height: 24 }} showHud={false} />
+                <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{v.ref}</span>
+                <span className="mono" style={{ fontSize: 11, color: "var(--ink-2)" }}>{sceneOf(v.scene).label}</span>
+                <StatusBadge status={VIDEO_PILL[v.status] || "processing"} size="sm" />
+                <span style={{ textAlign: "right" }}><Grade value={v.aiGrade} size={12.5} /></span>
+                <span style={{ textAlign: "right", color: "var(--ink-4)" }}><Ico name="chevR" size={15} /></span>
+              </Row>
+            ))}
           </div>
         )}
       </div>

@@ -118,6 +118,26 @@ def test_rerun_creates_new_job(auth_headers, fake_s3, fake_ai, sample_video_byte
         assert len(runs) == 2
 
 
+def test_soft_deleted_video_excluded(auth_headers, fake_s3, fake_ai, sample_video_bytes) -> None:
+    """Runs for a soft-deleted video must not leak into observability."""
+    import datetime
+
+    video_id = _ingest(fake_s3, sample_video_bytes)
+    assert len(client.get("/ai/runs", headers=auth_headers).json()) == 1
+    assert client.get("/ai/stats", headers=auth_headers).json()["overall"]["completed"] == 1
+
+    with session_scope() as s:
+        v = s.get(Video, video_id)
+        assert v is not None
+        v.deleted_at = datetime.datetime.now(datetime.UTC)
+
+    assert client.get("/ai/runs", headers=auth_headers).json() == []
+    stats = client.get("/ai/stats", headers=auth_headers).json()
+    assert stats["overall"]["completed"] == 0
+    assert stats["by_model"] == []
+    assert stats["by_prompt_version"] == []
+
+
 def test_requires_admin(make_user, fake_s3, fake_ai, sample_video_bytes) -> None:
     _ingest(fake_s3, sample_video_bytes)
     _, token = make_user(role=UserRole.reviewer)
