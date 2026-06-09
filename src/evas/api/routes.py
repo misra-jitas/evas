@@ -28,7 +28,7 @@ from evas.db import get_session
 from evas.enums import JobType, UserRole
 from evas.export import build_export, latest_completed_run
 from evas.jobs import enqueue
-from evas.models import AiFrameFinding, Frame, ProcessingJob, User, Video
+from evas.models import AiFrameFinding, Checklist, Frame, ProcessingJob, User, Video
 
 router = APIRouter()
 _staff = require_roles(UserRole.admin, UserRole.reviewer)
@@ -129,6 +129,12 @@ def get_video(
         ).all():
             findings_by_frame[f.frame_id] = f
 
+    checklist_items: list[dict[str, Any]] | None = None
+    if run is not None:
+        checklist = session.get(Checklist, run.checklist_id)
+        if checklist is not None:
+            checklist_items = checklist.items
+
     frames = session.scalars(
         select(Frame).where(Frame.video_id == video_id).order_by(Frame.frame_index)
     ).all()
@@ -137,6 +143,7 @@ def get_video(
         finding = findings_by_frame.get(frame.id)
         frame_out.append(
             FrameFindingOut(
+                frame_id=frame.id,
                 frame_index=frame.frame_index,
                 timecode_seconds=float(frame.timecode_seconds),
                 timecode_label=frame.timecode_label,
@@ -167,6 +174,7 @@ def get_video(
         width=video.width,
         height=video.height,
         latest_ai_run=run_out,
+        checklist_items=checklist_items,
         frames=frame_out,
     )
 

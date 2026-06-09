@@ -3,10 +3,10 @@
 // submit→next, fading shortcut hints. Operates on the rich mock review model
 // (frame-level findings); live human-review writes are a documented follow-up.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api } from "../api";
+import { api, buildFrameOverrides } from "../api";
 import { Btn, ClientChip, ConfBar, FrameThumb, Grade, Ico, Meta, Modal, Stat } from "../components";
 import { D, sceneOf } from "../data";
-import type { Frame, ItemState, TFn } from "../types";
+import type { Frame, ItemState, Review, TFn } from "../types";
 import type { SessionState } from "./Queue";
 
 export interface SubmitResult {
@@ -20,16 +20,7 @@ export interface SubmitResult {
 
 let audioCtx: AudioContext | null = null;
 
-export function ReviewScreen({
-  t,
-  reviewId,
-  qaMode,
-  onExit,
-  onSubmitted,
-  session,
-  soundOn,
-  onToggleSound,
-}: {
+interface ReviewScreenProps {
   t: TFn;
   reviewId: string;
   qaMode: boolean;
@@ -38,8 +29,91 @@ export function ReviewScreen({
   session?: SessionState;
   soundOn: boolean;
   onToggleSound: () => void;
+}
+
+// Resolves the review model: live (a real video UUID → GET /videos/{id} + media)
+// or the bundled mock. Shows a loader until the live model arrives, then renders
+// the workbench. Submitting a live review writes through the human-review API.
+export function ReviewScreen(props: ReviewScreenProps) {
+  const { t, reviewId, onExit } = props;
+  const isLive = /^[0-9a-f-]{36}$/i.test(reviewId);
+  const [model, setModel] = useState<Review | null>(isLive ? null : D.getReview(reviewId));
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!isLive) {
+      setModel(D.getReview(reviewId));
+      setMediaUrl(null);
+      return;
+    }
+    let alive = true;
+    setModel(null);
+    setFailed(false);
+    Promise.all([api.videoReview(reviewId), api.videoMedia(reviewId).catch(() => null)])
+      .then(([m, media]) => {
+        if (!alive) return;
+        setModel(m);
+        setMediaUrl(media?.url ?? null);
+      })
+      .catch(() => alive && setFailed(true));
+    return () => {
+      alive = false;
+    };
+  }, [reviewId, isLive]);
+
+  const persist = useCallback(
+    (payload: { grade: number; notes: string; frames: Frame[] }) =>
+      api.submitHumanReview(reviewId, {
+        grade: payload.grade,
+        notes: payload.notes,
+        frames: payload.frames.map((f) => ({ frameId: f.id, note: f.note, overrides: buildFrameOverrides(f.items) })),
+      }),
+    [reviewId],
+  );
+
+  if (failed) {
+    return (
+      <div style={{ height: "100%", display: "grid", placeItems: "center", background: "var(--bg)" }}>
+        <div style={{ textAlign: "center", color: "var(--ink-3)" }}>
+          <Ico name="alert" size={28} stroke="var(--red)" />
+          <p style={{ marginTop: 10, fontSize: 13 }}>{t("review.loaderr")}</p>
+          <Btn kind="default" size="sm" icon="arrowL" onClick={onExit} style={{ marginTop: 12 }}>{t("review.back")}</Btn>
+        </div>
+      </div>
+    );
+  }
+  if (!model) {
+    return (
+      <div style={{ height: "100%", display: "grid", placeItems: "center", background: "var(--bg)", color: "var(--ink-3)" }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+          <Ico name="refresh" size={16} style={{ animation: "evas-spin 1s linear infinite" }} /> {t("common.loading")}…
+        </span>
+      </div>
+    );
+  }
+  return <ReviewWorkbench key={reviewId} {...props} review={model} mediaUrl={mediaUrl} live={isLive} onPersist={persist} />;
+}
+
+function ReviewWorkbench({
+  t,
+  reviewId,
+  qaMode,
+  onExit,
+  onSubmitted,
+  session,
+  soundOn,
+  onToggleSound,
+  review,
+  mediaUrl,
+  live,
+  onPersist,
+}: ReviewScreenProps & {
+  review: Review;
+  mediaUrl: string | null;
+  live: boolean;
+  onPersist: (p: { grade: number; notes: string; frames: Frame[] }) => Promise<unknown>;
 }) {
-  const review = useMemo(() => D.getReview(reviewId), [reviewId]);
   const totalDur = review.frames[review.frames.length - 1].t + 2;
 
   const [frames, setFrames] = useState<Frame[]>(() => review.frames.map((f) => ({ ...f, items: f.items.map((i) => ({ ...i })) })));
@@ -56,25 +130,6 @@ export function ReviewScreen({
   const [history, setHistory] = useState<{ frames: Frame[]; label: string }[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [saved, setSaved] = useState(true);
-
-  // The human reviewer watches the *actual* video. When opened from the live
-  // board, reviewId is a real video UUID → fetch a short-lived presigned URL.
-  const isLiveVideo = /^[0-9a-f-]{36}$/i.test(reviewId);
-  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (!isLiveVideo) {
-      setMediaUrl(null);
-      return;
-    }
-    let alive = true;
-    api
-      .videoMedia(reviewId)
-      .then((m) => alive && setMediaUrl(m.url))
-      .catch(() => alive && setMediaUrl(null));
-    return () => {
-      alive = false;
-    };
-  }, [reviewId, isLiveVideo]);
 
   const [kbdUses, setKbdUses] = useState(() => +(localStorage.getItem("evas-kbd-uses") || 0));
   const [hintHover, setHintHover] = useState(false);
@@ -246,9 +301,19 @@ export function ReviewScreen({
     if (submitting) return;
     setSubmitting(true);
     playTick();
-    setTimeout(() => {
-      onSubmitted({ ref: review.ref, grade: effGrade, overrides: overridesCount, reviewed: reviewedCount, total: frames.length, agreement });
-    }, 640);
+    const result = { ref: review.ref, grade: effGrade, overrides: overridesCount, reviewed: reviewedCount, total: frames.length, agreement };
+    // Live, non-QA reviews write through the human-review API (assign → frame
+    // overrides → grade + complete). QA and mock reviews keep the local flow.
+    if (live && !qaMode) {
+      onPersist({ grade: effGrade, notes: vNotes, frames })
+        .then(() => onSubmitted(result))
+        .catch((e: unknown) => {
+          setSubmitting(false);
+          flashMsg("⚠ submit failed: " + (e instanceof Error ? e.message : String(e)));
+        });
+    } else {
+      setTimeout(() => onSubmitted(result), 640);
+    }
   }
 
   useEffect(() => {

@@ -42,6 +42,7 @@ class ReviewBoardRow(BaseModel):
 
 
 class FrameFindingOut(BaseModel):
+    frame_id: uuid.UUID  # real frame id, for targeting human-review frame overrides
     frame_index: int
     timecode_seconds: float
     timecode_label: str
@@ -81,6 +82,7 @@ class VideoDetail(BaseModel):
     width: int | None
     height: int | None
     latest_ai_run: AiRunOut | None
+    checklist_items: list[dict[str, Any]] | None = None
     frames: list[FrameFindingOut]
 
 

@@ -125,9 +125,14 @@ def test_video_media_and_frame_image_urls(
     assert media.json()["url"].startswith("https://fake-s3.local/")
 
     detail = client.get(f"/videos/{video_id}", headers=auth_headers).json()
-    assert detail["frames"][0]["image_url"] is not None
-    assert detail["frames"][0]["image_url"].startswith("https://fake-s3.local/")
-    assert detail["frames"][0]["purged"] is False
+    f0 = detail["frames"][0]
+    assert f0["image_url"] is not None
+    assert f0["image_url"].startswith("https://fake-s3.local/")
+    assert f0["purged"] is False
+    # frame_id + checklist_items power the live reviewer workbench / overrides.
+    assert uuid.UUID(f0["frame_id"])  # real frame UUID present
+    assert detail["checklist_items"], "checklist items returned for the workbench"
+    assert {"key", "label"} <= set(detail["checklist_items"][0])
 
 
 def test_video_media_not_found(auth_headers) -> None:

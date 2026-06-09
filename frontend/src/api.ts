@@ -5,7 +5,7 @@
 // renders against an empty or unauthenticated backend during development.
 import { useEffect, useState } from "react";
 import { D, sceneOf } from "./data";
-import type { AiRunDetail, AiStatGroup, AiStats, BoardVideo, AiRun, Client, Frame, FrameItem, PortalVideo, Source } from "./types";
+import type { AiRunDetail, AiStatGroup, AiStats, BoardVideo, AiRun, Checklist, Client, Frame, FrameItem, PortalVideo, Priority, Review, Source } from "./types";
 
 const BASE: string = (import.meta.env.VITE_EVAS_API_BASE as string) || "/api";
 const BOOTSTRAP: string = (import.meta.env.VITE_EVAS_BOOTSTRAP_TOKEN as string) || "";
@@ -332,6 +332,94 @@ function adaptRunDetail(r: RawRunDetail): AiRunDetail {
   };
 }
 
+// ---- Reviewer workbench: live video detail -> the prototype Review model ----
+interface RawVideoFrame {
+  frame_id: string;
+  frame_index: number;
+  timecode_seconds: number;
+  timecode_label: string;
+  image_url: string | null;
+  description: string | null;
+  findings: Record<string, { value: unknown; confidence: number | null }> | null;
+  flagged: boolean | null;
+}
+interface RawChecklistItem {
+  key: string;
+  label: string;
+  type?: string;
+  weight?: number;
+}
+interface RawVideoDetail {
+  id: string;
+  client_id: string;
+  external_ref: string | null;
+  priority: string;
+  duration_seconds: number | null;
+  latest_ai_run: { grade: number | null; model: string; prompt_version: string; summary: string | null } | null;
+  checklist_items: RawChecklistItem[] | null;
+  frames: RawVideoFrame[];
+}
+
+function fmtDur(secs: number | null): string {
+  if (secs == null) return "—";
+  const m = Math.floor(secs / 60);
+  const s = Math.round(secs % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+// The live checklist is weight-based (no "expect"); set expect = the AI value so
+// confirming costs nothing and an override is what moves the derived grade. Map
+// weight>=2 to the workbench's "risk" (heavier penalty).
+export function adaptVideoReview(r: RawVideoDetail): Review {
+  const scene = sceneFor(r.id);
+  const hue = sceneOf(scene).hue;
+  const defs = new Map((r.checklist_items || []).map((c) => [c.key, c]));
+  const run = r.latest_ai_run;
+  const frames: Frame[] = r.frames.map((f) => {
+    const items: FrameItem[] = Object.entries(f.findings || {}).map(([key, val]) => {
+      const def = defs.get(key);
+      const aiValue = yesNo(val?.value);
+      return { key, label: def?.label || key, expect: aiValue, risk: (def?.weight ?? 1) >= 2, aiValue, conf: val?.confidence ?? 0, state: "pending" as const };
+    });
+    return { id: f.frame_id, idx: f.frame_index, t: f.timecode_seconds, timecode: f.timecode_label, scene, hue, flagged: !!f.flagged, touched: false, note: "", desc: f.description || "", items, src: f.image_url };
+  });
+  const checklist: Checklist = {
+    name: "Checklist",
+    version: run?.prompt_version || "",
+    grading_mode: "",
+    items: (r.checklist_items || []).map((c) => ({ key: c.key, label: c.label, kind: c.type || "boolean", expect: "", risk: (c.weight ?? 1) >= 2 })),
+  };
+  return {
+    id: r.id,
+    ref: r.external_ref || r.id.slice(0, 8),
+    client: clientFromId(r.client_id),
+    scene,
+    sceneLabel: sceneOf(scene).label,
+    priority: (r.priority as Priority) || "normal",
+    aiGrade: run?.grade ?? 0,
+    frameCount: frames.length,
+    flaggedCount: frames.filter((f) => f.flagged).length,
+    flaggedIdx: frames.filter((f) => f.flagged).map((f) => f.idx),
+    duration: fmtDur(r.duration_seconds),
+    assignedMins: 0,
+    model: run?.model || "—",
+    promptVersion: run?.prompt_version || "—",
+    checklist,
+    aiSummary: run?.summary || "",
+    frames,
+  };
+}
+
+/** override_findings for one frame: only items the reviewer actually overrode. */
+export function buildFrameOverrides(items: { key: string; state: string }[]): Record<string, { value: boolean; confidence: number }> {
+  const out: Record<string, { value: boolean; confidence: number }> = {};
+  for (const it of items) {
+    if (it.state === "override-yes") out[it.key] = { value: true, confidence: 1 };
+    else if (it.state === "override-no") out[it.key] = { value: false, confidence: 1 };
+  }
+  return out;
+}
+
 export interface ClientRecord {
   id: string;
   name: string;
@@ -399,6 +487,36 @@ export const api = {
     request<{ url: string; expires_in: number; filename: string | null; duration_seconds: number | null }>(
       `/videos/${id}/media`,
     ),
+  videoReview: (id: string) =>
+    warmClients()
+      .then(() => request<RawVideoDetail>(`/videos/${id}`))
+      .then(adaptVideoReview),
+  // Persist a human review: assign → per-frame overrides/notes → grade + complete.
+  // Completing (non-QA, graded) moves the video to human_reviewed + enqueues notify.
+  submitHumanReview: async (
+    videoId: string,
+    payload: {
+      grade: number;
+      notes: string;
+      frames: { frameId: string; note: string; overrides: Record<string, { value: boolean; confidence: number }> }[];
+    },
+  ): Promise<string> => {
+    const review = await request<{ id: string }>(`/videos/${videoId}/human-reviews`, jsonInit("POST", {}));
+    for (const f of payload.frames) {
+      const hasOverride = Object.keys(f.overrides).length > 0;
+      if (!hasOverride && !f.note) continue;
+      await request(`/human-reviews/${review.id}/frames/${f.frameId}`, jsonInit("PUT", {
+        note: f.note || null,
+        override_findings: hasOverride ? f.overrides : null,
+      }));
+    }
+    await request(`/human-reviews/${review.id}`, jsonInit("PATCH", {
+      grade: payload.grade,
+      notes: payload.notes || null,
+      status: "done",
+    }));
+    return review.id;
+  },
   rerun: (id: string) => request(`/ai/runs/${id}/rerun`, { method: "POST" }),
   adminMetrics: () =>
     request<{ dead_jobs: number; queue_depth: number; running_jobs: number; webhook_failures: number }>(
