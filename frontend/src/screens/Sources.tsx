@@ -36,9 +36,13 @@ const VIDEO_PILL: Record<string, string> = {
   failed: "failed",
 };
 
-// Credential options: "Default" (EVAS service credentials, no per-source ref)
-// plus named refs that resolve to EVAS_CRED_<NAME>_* env vars on the backend.
-const CRED_OPTIONS: SelectOption[] = [{ v: "", l: "Default (EVAS credentials)" }, ...D.CREDENTIALS.map((c) => ({ v: c, l: c }))];
+// Credential options: "Default" (EVAS service credentials) + refs configured in
+// the backend env (GET /sources/credentials). Local/default setups show only
+// "Default" — no misleading names for credentials that wouldn't resolve.
+const DEFAULT_CRED_OPTION: SelectOption = { v: "", l: "Default (EVAS credentials)" };
+function credOptionsFrom(refs: string[]): SelectOption[] {
+  return [DEFAULT_CRED_OPTION, ...refs.map((r) => ({ v: r, l: r }))];
+}
 
 function ago(m: number): string {
   if (m === 0) return "just now";
@@ -73,6 +77,9 @@ export function SourcesScreen({
     () => api.listClients().then((rows) => rows.map((c) => ({ v: c.id, l: c.name }))),
     D.CLIENTS.map((c) => ({ v: c.id, l: c.name })),
   );
+  // Credential refs configured in the backend env; empty in local/default dev.
+  const credsLive = useLive<string[]>(() => api.listCredentials(), []);
+  const credOptions = credOptionsFrom(credsLive.data);
 
   useEffect(() => setSources(live.data), [live.data]);
 
@@ -250,8 +257,8 @@ export function SourcesScreen({
           </div>
         )}
       </div>
-      {showReg && <RegisterModal t={t} clientOptions={clientsLive.data} onClose={() => setShowReg(false)} onSubmit={register} />}
-      {editing && <EditModal t={t} src={editing} onClose={() => setEditing(null)} onSubmit={saveEdit} />}
+      {showReg && <RegisterModal t={t} clientOptions={clientsLive.data} credOptions={credOptions} onClose={() => setShowReg(false)} onSubmit={register} />}
+      {editing && <EditModal t={t} src={editing} credOptions={credOptions} onClose={() => setEditing(null)} onSubmit={saveEdit} />}
       {deleting && (
         <Modal onClose={() => setDeleting(null)}>
           <h3 style={{ fontSize: 17, marginBottom: 10 }}>{t("src.delTitle")}</h3>
@@ -268,7 +275,7 @@ export function SourcesScreen({
   );
 }
 
-function EditModal({ t, src, onClose, onSubmit }: { t: TFn; src: Source; onClose: () => void; onSubmit: (f: { label: string; cred: string; autoSync: boolean }) => void }) {
+function EditModal({ t, src, credOptions, onClose, onSubmit }: { t: TFn; src: Source; credOptions: SelectOption[]; onClose: () => void; onSubmit: (f: { label: string; cred: string; autoSync: boolean }) => void }) {
   const [label, setLabel] = useState(src.label);
   const [cred, setCred] = useState(src.cred || "");
   const [autoSync, setAutoSync] = useState(src.autoSync);
@@ -286,7 +293,7 @@ function EditModal({ t, src, onClose, onSubmit }: { t: TFn; src: Source; onClose
           <input value={label} onChange={(e) => setLabel(e.target.value)} style={fieldInput} />
         </Field>
         <Field label={t("src.cred")}>
-          <Select value={cred} onChange={setCred} options={CRED_OPTIONS} full />
+          <Select value={cred} onChange={setCred} options={credOptions} full />
         </Field>
         <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "2px 0" }}>
           <Toggle on={autoSync} onChange={() => setAutoSync((v) => !v)} />
@@ -301,7 +308,7 @@ function EditModal({ t, src, onClose, onSubmit }: { t: TFn; src: Source; onClose
   );
 }
 
-function RegisterModal({ t, clientOptions, onClose, onSubmit }: { t: TFn; clientOptions: SelectOption[]; onClose: () => void; onSubmit: (f: { type: "s3" | "url"; uri: string; label: string; client: string; cred: string; autoSync: boolean }) => void }) {
+function RegisterModal({ t, clientOptions, credOptions, onClose, onSubmit }: { t: TFn; clientOptions: SelectOption[]; credOptions: SelectOption[]; onClose: () => void; onSubmit: (f: { type: "s3" | "url"; uri: string; label: string; client: string; cred: string; autoSync: boolean }) => void }) {
   const [type, setType] = useState<"s3" | "url">("s3");
   const [uri, setUri] = useState("");
   const [label, setLabel] = useState("");
@@ -338,7 +345,7 @@ function RegisterModal({ t, clientOptions, onClose, onSubmit }: { t: TFn; client
             <Select value={client} onChange={setClient} options={clientOptions} full />
           </Field>
           <Field label={t("src.cred")}>
-            <Select value={cred} onChange={setCred} options={CRED_OPTIONS} full />
+            <Select value={cred} onChange={setCred} options={credOptions} full />
           </Field>
         </div>
         <button onClick={() => setShowSampling((s) => !s)} style={{ display: "flex", alignItems: "center", gap: 7, border: "none", background: "transparent", color: "var(--ink-2)", fontSize: 12.5, padding: 0, width: "fit-content" }}>

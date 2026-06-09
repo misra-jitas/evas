@@ -19,6 +19,7 @@ from evas.db import get_session
 from evas.enums import JobStatus, JobType, SourceStatus, UserRole, VideoStatus
 from evas.jobs import enqueue
 from evas.models import ProcessingJob, Source, User, Video
+from evas.storage import configured_credential_refs
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 _admin = require_roles(UserRole.admin)
@@ -92,23 +93,47 @@ def create_source(
     session: Session = Depends(get_session),
     user: User = Depends(_admin),
 ) -> SourceOut:
-    source = Source(
-        client_id=req.client_id,
-        label=req.label,
-        type=req.type,
-        uri_prefix=req.uri_prefix,
-        credential_ref=req.credential_ref,
-        sampling_override=req.sampling_override,
-        auto_sync=req.auto_sync,
-        status=SourceStatus.syncing if req.scan_now else SourceStatus.connected,
+    status = SourceStatus.syncing if req.scan_now else SourceStatus.connected
+    # (client_id, uri_prefix) is unique (incl. soft-deleted rows). An active
+    # duplicate is a clean 409; a soft-deleted one is revived rather than
+    # dead-ending on the constraint (delete-then-readd should just work).
+    existing = session.scalar(
+        select(Source).where(Source.client_id == req.client_id, Source.uri_prefix == req.uri_prefix)
     )
-    session.add(source)
+    if existing is not None and existing.deleted_at is None:
+        raise HTTPException(
+            status_code=409, detail="a source with this prefix already exists for this client"
+        )
+    if existing is not None:  # revive a previously soft-deleted source
+        existing.deleted_at = None
+        existing.label = req.label
+        existing.type = req.type
+        existing.credential_ref = req.credential_ref
+        existing.sampling_override = req.sampling_override
+        existing.auto_sync = req.auto_sync
+        existing.status = status
+        existing.last_error = None
+        source = existing
+        action = "recreated"
+    else:
+        source = Source(
+            client_id=req.client_id,
+            label=req.label,
+            type=req.type,
+            uri_prefix=req.uri_prefix,
+            credential_ref=req.credential_ref,
+            sampling_override=req.sampling_override,
+            auto_sync=req.auto_sync,
+            status=status,
+        )
+        session.add(source)
+        action = "created"
     session.flush()
     write_audit(
         session,
         entity_type="source",
         entity_id=source.id,
-        action="created",
+        action=action,
         new_value={"label": source.label, "uri_prefix": source.uri_prefix},
         user_id=user.id,
     )
@@ -128,6 +153,15 @@ def list_sources(
     if client_id is not None:
         stmt = stmt.where(Source.client_id == client_id)
     return [_to_out(session, s) for s in session.scalars(stmt).all()]
+
+
+@router.get("/credentials")
+def list_credentials(user: User = Depends(_admin)) -> dict[str, list[str]]:
+    """Credential refs that have keys configured in env, for the register form.
+
+    Declared before /{source_id} so "credentials" isn't parsed as an id.
+    """
+    return {"refs": configured_credential_refs()}
 
 
 @router.get("/{source_id}", response_model=SourceOut)

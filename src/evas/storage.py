@@ -74,6 +74,16 @@ def get_s3_client(credential_ref: str | None = None) -> S3Client:
     return boto3.client("s3", **_client_kwargs(credential_ref))
 
 
+def configured_credential_refs() -> list[str]:
+    """Credential refs that have keys configured in env (EVAS_CRED_<SLUG>_ACCESS_KEY_ID).
+
+    Returns the slugs (the canonical, slug-stable ref names) so the UI can offer
+    only credentials that will actually resolve. Empty in local/default setups.
+    """
+    pat = re.compile(r"^EVAS_CRED_(.+)_ACCESS_KEY_ID$")
+    return sorted({m.group(1) for k in os.environ if (m := pat.match(k))})
+
+
 def download_to_file(uri: str, dest_path: str, credential_ref: str | None = None) -> None:
     bucket, key = parse_s3_uri(uri)
     get_s3_client(credential_ref).download_file(bucket, key, dest_path)

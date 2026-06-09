@@ -470,6 +470,8 @@ export const api = {
   ) => request<RawSource>(`/sources/${id}`, jsonInit("PATCH", body)).then(adaptSource),
   deleteSource: (id: string) => request(`/sources/${id}`, { method: "DELETE" }),
   syncSource: (id: string) => request(`/sources/${id}/sync`, { method: "POST" }),
+  // Credential refs configured in the backend env (for the register form).
+  listCredentials: () => request<{ refs: string[] }>("/sources/credentials").then((r) => r.refs),
   listRuns: (qs = "") =>
     warmClients()
       .then(() => request<RawRun[]>(`/ai/runs${qs}`))
