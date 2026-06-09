@@ -178,7 +178,7 @@ def test_scan_list_failure_marks_source_error(auth_headers, fake_s3, monkeypatch
     src = _register(client_id, auth_headers, uri_prefix="s3://nonexistent-bucket/")
     source_id = src["id"]
 
-    def boom(_prefix: str):
+    def boom(*_args, **_kw):
         raise RuntimeError("NoSuchBucket: The specified bucket does not exist")
 
     monkeypatch.setattr("evas.pipeline.sync.list_objects", boom)
@@ -189,6 +189,28 @@ def test_scan_list_failure_marks_source_error(auth_headers, fake_s3, monkeypatch
     assert detail["status"] == "error"  # not stuck on "syncing"
     assert "NoSuchBucket" in detail["last_error"]
     assert detail["last_sync_result"]["error"] == "list_failed"
+
+
+def test_credential_resolution_from_env(monkeypatch) -> None:
+    """A named credential_ref resolves per-source keys from namespaced env vars."""
+    from evas import storage
+
+    storage.get_s3_client.cache_clear()
+    # Unknown ref with no env → a clear, actionable error (surfaced as source error).
+    try:
+        storage.get_s3_client("acme-prod")
+        raise AssertionError("expected ValueError for missing credentials")
+    except ValueError as exc:
+        assert "EVAS_CRED_ACME_PROD_ACCESS_KEY_ID" in str(exc)
+
+    # With env set, the client builds (slug = uppercased, non-alnum -> "_").
+    monkeypatch.setenv("EVAS_CRED_ACME_PROD_ACCESS_KEY_ID", "AKIA_TEST")
+    monkeypatch.setenv("EVAS_CRED_ACME_PROD_SECRET_ACCESS_KEY", "secret")
+    monkeypatch.setenv("EVAS_CRED_ACME_PROD_REGION", "eu-west-1")
+    storage.get_s3_client.cache_clear()
+    client = storage.get_s3_client("acme-prod")
+    assert client.meta.region_name == "eu-west-1"
+    storage.get_s3_client.cache_clear()
 
 
 def test_patch_disable_and_soft_delete(auth_headers, fake_s3) -> None:

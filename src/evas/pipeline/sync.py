@@ -85,7 +85,7 @@ def handle_sync_source(session: Session, job: ProcessingJob) -> None:
     # network) must not leave the source stuck in 'syncing' — record the error
     # state, commit, then re-raise so the job retries/dead-letters normally.
     try:
-        objects = list_objects(source.uri_prefix)
+        objects = list_objects(source.uri_prefix, source.credential_ref)
     except Exception as exc:  # noqa: BLE001 - surface any backend/list error as source error
         msg = f"could not list {source.uri_prefix}: {exc!r}"
         source.status = SourceStatus.error

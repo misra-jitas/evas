@@ -20,7 +20,7 @@ from evas.config import get_settings
 from evas.enums import JobType, VideoPriority, VideoStatus
 from evas.jobs import enqueue
 from evas.media import probe_video
-from evas.models import ProcessingJob, Video
+from evas.models import ProcessingJob, Source, Video
 from evas.storage import download_to_file
 
 
@@ -42,7 +42,13 @@ def handle_ingest(session: Session, job: ProcessingJob) -> None:
     fd, tmp_path = tempfile.mkstemp(dir=settings.work_dir, suffix=os.path.splitext(source_uri)[1])
     os.close(fd)
     try:
-        download_to_file(source_uri, tmp_path)
+        # The original video lives in the source's bucket — use its credentials.
+        source_ref = payload.get("source_id")
+        cred = None
+        if source_ref:
+            src = session.get(Source, uuid.UUID(str(source_ref)))
+            cred = src.credential_ref if src else None
+        download_to_file(source_uri, tmp_path, cred)
         file_hash = _sha256_file(tmp_path)
 
         # Idempotent: dedup on (client_id, file_hash).

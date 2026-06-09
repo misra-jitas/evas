@@ -28,7 +28,7 @@ from evas.db import get_session
 from evas.enums import JobType, UserRole
 from evas.export import build_export, latest_completed_run
 from evas.jobs import enqueue
-from evas.models import AiFrameFinding, Checklist, Frame, ProcessingJob, User, Video
+from evas.models import AiFrameFinding, Checklist, Frame, ProcessingJob, Source, User, Video
 
 router = APIRouter()
 _staff = require_roles(UserRole.admin, UserRole.reviewer)
@@ -192,8 +192,11 @@ def get_video_media(
     video = _get_active_video(session, video_id)
     assert_can_access_client(user, video.client_id)
     expires_in = 3600
+    # Video lives in the source bucket → sign with the source's credentials.
+    src = session.get(Source, video.source_id) if video.source_id else None
+    cred = src.credential_ref if src else None
     return {
-        "url": storage.presign_get(video.source_uri, expires_in=expires_in),
+        "url": storage.presign_get(video.source_uri, expires_in=expires_in, credential_ref=cred),
         "expires_in": expires_in,
         "filename": video.original_filename,
         "duration_seconds": float(video.duration_seconds)

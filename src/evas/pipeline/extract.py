@@ -20,7 +20,7 @@ from evas.config import get_settings
 from evas.enums import JobType, VideoStatus
 from evas.jobs import enqueue
 from evas.media import extract_frames
-from evas.models import Client, Frame, ProcessingJob, Video
+from evas.models import Client, Frame, ProcessingJob, Source, Video
 from evas.storage import download_to_file, upload_file
 
 _DEFAULT_SAMPLING = {"interval_seconds": 5, "max_frames": 300, "frame_width": 1280}
@@ -60,7 +60,10 @@ def handle_extract_frames(session: Session, job: ProcessingJob) -> None:
     os.close(fd)
     work_dir = tempfile.mkdtemp(dir=settings.work_dir, prefix=f"frames_{video.id}_")
     try:
-        download_to_file(video.source_uri, tmp_video)
+        # Original video is in the source bucket (source creds); frames upload to
+        # EVAS's own bucket below (default creds).
+        src = session.get(Source, video.source_id) if video.source_id else None
+        download_to_file(video.source_uri, tmp_video, src.credential_ref if src else None)
         frames = extract_frames(
             tmp_video,
             work_dir,

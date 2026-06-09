@@ -36,6 +36,10 @@ const VIDEO_PILL: Record<string, string> = {
   failed: "failed",
 };
 
+// Credential options: "Default" (EVAS service credentials, no per-source ref)
+// plus named refs that resolve to EVAS_CRED_<NAME>_* env vars on the backend.
+const CRED_OPTIONS: SelectOption[] = [{ v: "", l: "Default (EVAS credentials)" }, ...D.CREDENTIALS.map((c) => ({ v: c, l: c }))];
+
 function ago(m: number): string {
   if (m === 0) return "just now";
   if (m < 60) return `${m}m ago`;
@@ -266,7 +270,7 @@ export function SourcesScreen({
 
 function EditModal({ t, src, onClose, onSubmit }: { t: TFn; src: Source; onClose: () => void; onSubmit: (f: { label: string; cred: string; autoSync: boolean }) => void }) {
   const [label, setLabel] = useState(src.label);
-  const [cred, setCred] = useState(src.cred || D.CREDENTIALS[0]);
+  const [cred, setCred] = useState(src.cred || "");
   const [autoSync, setAutoSync] = useState(src.autoSync);
   return (
     <Modal onClose={onClose} wide>
@@ -282,7 +286,7 @@ function EditModal({ t, src, onClose, onSubmit }: { t: TFn; src: Source; onClose
           <input value={label} onChange={(e) => setLabel(e.target.value)} style={fieldInput} />
         </Field>
         <Field label={t("src.cred")}>
-          <Select value={cred} onChange={setCred} options={D.CREDENTIALS.map((c) => ({ v: c, l: c }))} full />
+          <Select value={cred} onChange={setCred} options={CRED_OPTIONS} full />
         </Field>
         <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "2px 0" }}>
           <Toggle on={autoSync} onChange={() => setAutoSync((v) => !v)} />
@@ -302,7 +306,7 @@ function RegisterModal({ t, clientOptions, onClose, onSubmit }: { t: TFn; client
   const [uri, setUri] = useState("");
   const [label, setLabel] = useState("");
   const [client, setClient] = useState(clientOptions[0]?.v || "");
-  const [cred, setCred] = useState(D.CREDENTIALS[0]);
+  const [cred, setCred] = useState("");
   const [autoSync, setAutoSync] = useState(true);
   const [showSampling, setShowSampling] = useState(false);
 
@@ -334,7 +338,7 @@ function RegisterModal({ t, clientOptions, onClose, onSubmit }: { t: TFn; client
             <Select value={client} onChange={setClient} options={clientOptions} full />
           </Field>
           <Field label={t("src.cred")}>
-            <Select value={cred} onChange={setCred} options={D.CREDENTIALS.map((c) => ({ v: c, l: c }))} full />
+            <Select value={cred} onChange={setCred} options={CRED_OPTIONS} full />
           </Field>
         </div>
         <button onClick={() => setShowSampling((s) => !s)} style={{ display: "flex", alignItems: "center", gap: 7, border: "none", background: "transparent", color: "var(--ink-2)", fontSize: 12.5, padding: 0, width: "fit-content" }}>

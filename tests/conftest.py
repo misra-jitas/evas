@@ -84,7 +84,7 @@ class FakeS3:
     def put(self, uri: str, data: bytes) -> None:
         self.store[uri] = data
 
-    def download_to_file(self, uri: str, dest_path: str) -> None:
+    def download_to_file(self, uri: str, dest_path: str, credential_ref: str | None = None) -> None:
         with open(dest_path, "wb") as fh:
             fh.write(self.store[uri])
 
@@ -98,13 +98,15 @@ class FakeS3:
     def get_object_bytes(self, uri: str) -> bytes:
         return self.store[uri]
 
-    def presign_get(self, uri: str, expires_in: int = 3600) -> str:
+    def presign_get(
+        self, uri: str, expires_in: int = 3600, credential_ref: str | None = None
+    ) -> str:
         # parse_s3_uri-equivalent validation; return a deterministic fake URL.
         if not uri.startswith("s3://"):
             raise ValueError(uri)
         return f"https://fake-s3.local/{uri[len('s3://') :]}?sig=test&exp={expires_in}"
 
-    def list_objects(self, uri_prefix: str) -> list[str]:
+    def list_objects(self, uri_prefix: str, credential_ref: str | None = None) -> list[str]:
         return sorted(uri for uri in self.store if uri.startswith(uri_prefix))
 
     def delete_object(self, uri: str) -> None:
