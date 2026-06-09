@@ -191,6 +191,42 @@ def test_scan_list_failure_marks_source_error(auth_headers, fake_s3, monkeypatch
     assert detail["last_sync_result"]["error"] == "list_failed"
 
 
+def test_duplicate_prefix_returns_409(auth_headers, fake_s3) -> None:
+    client_id = _seed_client()
+    _register(client_id, auth_headers, uri_prefix="s3://evas-videos/dup/")
+    resp = client.post(
+        "/sources",
+        json={
+            "client_id": str(client_id),
+            "label": "again",
+            "type": "s3",
+            "uri_prefix": "s3://evas-videos/dup/",
+        },
+        headers=auth_headers,
+    )
+    assert resp.status_code == 409
+    assert "already exists" in resp.json()["detail"]
+
+
+def test_readd_revives_soft_deleted_source(auth_headers, fake_s3) -> None:
+    """Deleting then re-registering the same prefix revives the row, not a 500."""
+    client_id = _seed_client()
+    first = _register(client_id, auth_headers, uri_prefix="s3://evas-videos/revive/")
+    assert client.delete(f"/sources/{first['id']}", headers=auth_headers).status_code == 204
+    again = _register(client_id, auth_headers, uri_prefix="s3://evas-videos/revive/", label="back")
+    assert again["id"] == first["id"]  # same row, revived
+    assert again["label"] == "back"
+
+
+def test_list_credentials(auth_headers, monkeypatch) -> None:
+    assert client.get("/sources/credentials", headers=auth_headers).json() == {"refs": []}
+    monkeypatch.setenv("EVAS_CRED_ACME_PROD_ACCESS_KEY_ID", "x")
+    monkeypatch.setenv("EVAS_CRED_ACME_PROD_SECRET_ACCESS_KEY", "y")
+    assert client.get("/sources/credentials", headers=auth_headers).json() == {
+        "refs": ["ACME_PROD"]
+    }
+
+
 def test_credential_resolution_from_env(monkeypatch) -> None:
     """A named credential_ref resolves per-source keys from namespaced env vars."""
     from evas import storage
