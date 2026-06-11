@@ -12,6 +12,7 @@ from evas.pipeline.extract import handle_extract_frames
 from evas.pipeline.ingest import handle_ingest
 from evas.pipeline.retention import handle_archive, handle_purge_frames
 from evas.pipeline.review import handle_ai_review
+from evas.pipeline.sync import handle_sync_source
 from evas.webhooks import handle_notify
 
 Handler = Callable[[Session, ProcessingJob], None]
@@ -23,6 +24,7 @@ HANDLERS: dict[JobType, Handler] = {
     JobType.notify: handle_notify,
     JobType.purge_frames: handle_purge_frames,
     JobType.archive: handle_archive,
+    JobType.sync_source: handle_sync_source,
 }
 
 __all__ = ["HANDLERS", "Handler"]

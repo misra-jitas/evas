@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- EVAS leaf — cobalt, matching the UI accent (oklch 0.52 0.17 252) -->
+  <path d="M6.5 25.5 C 6.5 12.8 13.3 6 26 6 C 26 18.7 19.2 25.5 6.5 25.5 Z" fill="#2e5ad6"/>
+  <g fill="none" stroke="#ffffff" stroke-width="1.7" stroke-linecap="round" opacity="0.92">
+    <!-- midrib, base -> tip -->
+    <path d="M9 23 L 23.5 8.5"/>
+    <!-- side veins -->
+    <path d="M13.2 18.8 L 18 17"/>
+    <path d="M16.5 15.5 L 20.5 14"/>
+    <path d="M12 21.5 L 14.5 18.5"/>
+  </g>
+</svg>

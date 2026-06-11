@@ -1,0 +1,31 @@
+{
+  "name": "evas-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "EVAS web UI — reviewer workbench, ops dashboard, sources, AI review, client portal.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^10.4.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.61.0",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.9"
+  }
+}

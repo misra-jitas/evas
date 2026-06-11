@@ -102,6 +102,7 @@ class Video(Base):
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    source_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sources.id"))
     external_ref: Mapped[str | None] = mapped_column(Text)
     original_filename: Mapped[str | None] = mapped_column(Text)
     source_uri: Mapped[str] = mapped_column(Text, nullable=False)
@@ -316,3 +317,63 @@ class WebhookDelivery(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=_now
     )
+
+
+class Source(Base):
+    __tablename__ = "sources"
+    __table_args__ = (UniqueConstraint("client_id", "uri_prefix"),)
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    type: Mapped[enums.SourceType] = mapped_column(
+        _pg_enum(enums.SourceType, "source_type"), nullable=False
+    )
+    uri_prefix: Mapped[str] = mapped_column(Text, nullable=False)
+    credential_ref: Mapped[str | None] = mapped_column(Text)
+    sampling_override: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    status: Mapped[enums.SourceStatus] = mapped_column(
+        _pg_enum(enums.SourceStatus, "source_status"),
+        nullable=False,
+        server_default=text("'connected'"),
+    )
+    auto_sync: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    last_synced_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    last_sync_result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=_now
+    )
+    deleted_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+
+
+class Clip(Base):
+    __tablename__ = "clips"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    video_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("videos.id", ondelete="CASCADE"), nullable=False
+    )
+    start_seconds: Mapped[Decimal] = mapped_column(Numeric(10, 3), nullable=False)
+    end_seconds: Mapped[Decimal] = mapped_column(Numeric(10, 3), nullable=False)
+    label: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=_now
+    )
+
+
+class AiClipFinding(Base):
+    __tablename__ = "ai_clip_findings"
+    __table_args__ = (UniqueConstraint("ai_run_id", "clip_id"),)
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    ai_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("ai_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    clip_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("clips.id", ondelete="CASCADE"), nullable=False
+    )
+    description: Mapped[str | None] = mapped_column(Text)
+    findings: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric(4, 3))
+    flagged: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))

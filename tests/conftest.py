@@ -79,11 +79,12 @@ class FakeS3:
 
     def __init__(self) -> None:
         self.store: dict[str, bytes] = {}
+        self.storage_classes: dict[str, str] = {}
 
     def put(self, uri: str, data: bytes) -> None:
         self.store[uri] = data
 
-    def download_to_file(self, uri: str, dest_path: str) -> None:
+    def download_to_file(self, uri: str, dest_path: str, credential_ref: str | None = None) -> None:
         with open(dest_path, "wb") as fh:
             fh.write(self.store[uri])
 
@@ -97,8 +98,22 @@ class FakeS3:
     def get_object_bytes(self, uri: str) -> bytes:
         return self.store[uri]
 
+    def presign_get(
+        self, uri: str, expires_in: int = 3600, credential_ref: str | None = None
+    ) -> str:
+        # parse_s3_uri-equivalent validation; return a deterministic fake URL.
+        if not uri.startswith("s3://"):
+            raise ValueError(uri)
+        return f"https://fake-s3.local/{uri[len('s3://') :]}?sig=test&exp={expires_in}"
+
+    def list_objects(self, uri_prefix: str, credential_ref: str | None = None) -> list[str]:
+        return sorted(uri for uri in self.store if uri.startswith(uri_prefix))
+
     def delete_object(self, uri: str) -> None:
         self.store.pop(uri, None)
+
+    def set_storage_class(self, uri: str, storage_class: str) -> None:
+        self.storage_classes[uri] = storage_class
 
 
 @pytest.fixture
@@ -110,6 +125,10 @@ def fake_s3(monkeypatch: pytest.MonkeyPatch) -> FakeS3:
     monkeypatch.setattr("evas.pipeline.extract.upload_file", s3.upload_file)
     monkeypatch.setattr("evas.pipeline.review.get_object_bytes", s3.get_object_bytes)
     monkeypatch.setattr("evas.pipeline.retention.delete_object", s3.delete_object)
+    monkeypatch.setattr("evas.pipeline.retention.set_storage_class", s3.set_storage_class)
+    monkeypatch.setattr("evas.pipeline.sync.list_objects", s3.list_objects)
+    # API media/frame-image endpoints presign via the storage module.
+    monkeypatch.setattr("evas.storage.presign_get", s3.presign_get)
     return s3
 
 
@@ -117,9 +136,11 @@ class FakeReviewer:
     """Deterministic stand-in for the Anthropic vision reviewer."""
 
     model = "claude-haiku-4-5-fake"
-    prompt_version = "1.0.0"
 
-    def review_frame(self, image_bytes: bytes, items, media_type: str = "image/jpeg"):
+    def __init__(self, prompt_version: str = "1.0.0") -> None:
+        self.prompt_version = prompt_version
+
+    def _result(self, items):
         from evas.ai import FrameReview
 
         findings = {}
@@ -130,19 +151,27 @@ class FakeReviewer:
                 "confidence": 0.5 if item["key"] == "holding_broom" else 0.95,
             }
         return FrameReview(
-            description="fake frame",
+            description="fake review",
             findings=findings,
             tokens_in=100,
             tokens_out=20,
             cost_usd=0.0001,
         )
 
+    def review_frame(self, image_bytes: bytes, items, media_type: str = "image/jpeg"):
+        return self._result(items)
+
+    def review_clip(self, images, items, media_type: str = "image/jpeg"):
+        return self._result(items)
+
 
 @pytest.fixture
 def fake_ai(monkeypatch: pytest.MonkeyPatch) -> None:
     import evas.ai
 
-    monkeypatch.setattr(evas.ai, "AiReviewer", lambda *a, **k: FakeReviewer())
+    monkeypatch.setattr(
+        evas.ai, "AiReviewer", lambda *a, **k: FakeReviewer(k.get("prompt_version", "1.0.0"))
+    )
 
 
 @pytest.fixture

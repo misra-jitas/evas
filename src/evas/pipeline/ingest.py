@@ -20,7 +20,7 @@ from evas.config import get_settings
 from evas.enums import JobType, VideoPriority, VideoStatus
 from evas.jobs import enqueue
 from evas.media import probe_video
-from evas.models import ProcessingJob, Video
+from evas.models import ProcessingJob, Source, Video
 from evas.storage import download_to_file
 
 
@@ -42,7 +42,13 @@ def handle_ingest(session: Session, job: ProcessingJob) -> None:
     fd, tmp_path = tempfile.mkstemp(dir=settings.work_dir, suffix=os.path.splitext(source_uri)[1])
     os.close(fd)
     try:
-        download_to_file(source_uri, tmp_path)
+        # The original video lives in the source's bucket — use its credentials.
+        source_ref = payload.get("source_id")
+        cred = None
+        if source_ref:
+            src = session.get(Source, uuid.UUID(str(source_ref)))
+            cred = src.credential_ref if src else None
+        download_to_file(source_uri, tmp_path, cred)
         file_hash = _sha256_file(tmp_path)
 
         # Idempotent: dedup on (client_id, file_hash).
@@ -55,6 +61,11 @@ def handle_ingest(session: Session, job: ProcessingJob) -> None:
         ).first()
         if existing is not None:
             job.video_id = existing.id
+            # Backfill the source link if this ingest came from a source scan and
+            # the existing video isn't linked yet (keeps source funnels accurate).
+            source_ref = payload.get("source_id")
+            if source_ref and existing.source_id is None:
+                existing.source_id = uuid.UUID(str(source_ref))
             write_audit(
                 session,
                 entity_type="video",
@@ -65,8 +76,10 @@ def handle_ingest(session: Session, job: ProcessingJob) -> None:
             return
 
         probe = probe_video(tmp_path)
+        source_ref = payload.get("source_id")
         video = Video(
             client_id=client_id,
+            source_id=uuid.UUID(str(source_ref)) if source_ref else None,
             external_ref=payload.get("external_ref"),
             original_filename=payload.get("original_filename"),
             source_uri=source_uri,

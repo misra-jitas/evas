@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from evas import storage
 from evas.api.schemas import (
     AiRunOut,
     FrameFindingOut,
@@ -27,7 +28,7 @@ from evas.db import get_session
 from evas.enums import JobType, UserRole
 from evas.export import build_export, latest_completed_run
 from evas.jobs import enqueue
-from evas.models import AiFrameFinding, Frame, ProcessingJob, User, Video
+from evas.models import AiFrameFinding, Checklist, Frame, ProcessingJob, Source, User, Video
 
 router = APIRouter()
 _staff = require_roles(UserRole.admin, UserRole.reviewer)
@@ -61,6 +62,7 @@ def list_videos(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
     client_id: uuid.UUID | None = None,
+    source_id: uuid.UUID | None = None,
     status: str | None = None,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -75,6 +77,9 @@ def list_videos(
     if client_id is not None:
         sql += " AND client_id = :client_id"
         params["client_id"] = str(client_id)
+    if source_id is not None:
+        sql += " AND source_id = :source_id"
+        params["source_id"] = str(source_id)
     if status is not None:
         sql += " AND status = :status"
         params["status"] = status
@@ -124,6 +129,12 @@ def get_video(
         ).all():
             findings_by_frame[f.frame_id] = f
 
+    checklist_items: list[dict[str, Any]] | None = None
+    if run is not None:
+        checklist = session.get(Checklist, run.checklist_id)
+        if checklist is not None:
+            checklist_items = checklist.items
+
     frames = session.scalars(
         select(Frame).where(Frame.video_id == video_id).order_by(Frame.frame_index)
     ).all()
@@ -132,10 +143,12 @@ def get_video(
         finding = findings_by_frame.get(frame.id)
         frame_out.append(
             FrameFindingOut(
+                frame_id=frame.id,
                 frame_index=frame.frame_index,
                 timecode_seconds=float(frame.timecode_seconds),
                 timecode_label=frame.timecode_label,
                 image_uri=frame.image_uri,
+                image_url=None if frame.purged else storage.presign_get(frame.image_uri),
                 purged=frame.purged,
                 description=finding.description if finding else None,
                 findings=finding.findings if finding else None,
@@ -161,8 +174,35 @@ def get_video(
         width=video.width,
         height=video.height,
         latest_ai_run=run_out,
+        checklist_items=checklist_items,
         frames=frame_out,
     )
+
+
+@router.get("/videos/{video_id}/media")
+def get_video_media(
+    video_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Presigned URL for the original video so a reviewer can watch/seek it.
+
+    Tenancy-scoped; the URL is short-lived and supports range requests.
+    """
+    video = _get_active_video(session, video_id)
+    assert_can_access_client(user, video.client_id)
+    expires_in = 3600
+    # Video lives in the source bucket → sign with the source's credentials.
+    src = session.get(Source, video.source_id) if video.source_id else None
+    cred = src.credential_ref if src else None
+    return {
+        "url": storage.presign_get(video.source_uri, expires_in=expires_in, credential_ref=cred),
+        "expires_in": expires_in,
+        "filename": video.original_filename,
+        "duration_seconds": float(video.duration_seconds)
+        if video.duration_seconds is not None
+        else None,
+    }
 
 
 @router.get("/videos/{video_id}/export")

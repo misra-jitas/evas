@@ -102,6 +102,43 @@ def test_list_detail_export(auth_headers, fake_s3, fake_ai, sample_video_bytes) 
     assert len(ex["frames"]) == 2
 
 
+def test_video_media_and_frame_image_urls(
+    auth_headers, fake_s3, fake_ai, sample_video_bytes
+) -> None:
+    """Reviewer can fetch a presigned video URL; frames carry presigned image URLs."""
+    client_id = _seed_client()
+    source_uri = "s3://evas-videos/a/watch.mp4"
+    fake_s3.put(source_uri, sample_video_bytes)
+    resp = client.post(
+        "/videos",
+        json={"client_id": str(client_id), "source_uri": source_uri},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 202
+    while worker.run_once():
+        pass
+    with session_scope() as s:
+        video_id = s.scalars(select(Video.id)).one()
+
+    media = client.get(f"/videos/{video_id}/media", headers=auth_headers)
+    assert media.status_code == 200
+    assert media.json()["url"].startswith("https://fake-s3.local/")
+
+    detail = client.get(f"/videos/{video_id}", headers=auth_headers).json()
+    f0 = detail["frames"][0]
+    assert f0["image_url"] is not None
+    assert f0["image_url"].startswith("https://fake-s3.local/")
+    assert f0["purged"] is False
+    # frame_id + checklist_items power the live reviewer workbench / overrides.
+    assert uuid.UUID(f0["frame_id"])  # real frame UUID present
+    assert detail["checklist_items"], "checklist items returned for the workbench"
+    assert {"key", "label"} <= set(detail["checklist_items"][0])
+
+
+def test_video_media_not_found(auth_headers) -> None:
+    assert client.get(f"/videos/{uuid.uuid4()}/media", headers=auth_headers).status_code == 404
+
+
 def test_video_not_found(auth_headers) -> None:
     resp = client.get(f"/videos/{uuid.uuid4()}", headers=auth_headers)
     assert resp.status_code == 404

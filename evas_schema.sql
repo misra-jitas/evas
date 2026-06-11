@@ -15,7 +15,9 @@ CREATE TYPE grading_mode     AS ENUM ('derived', 'holistic');  -- derived = comp
 CREATE TYPE run_status       AS ENUM ('queued', 'running', 'completed', 'failed');
 CREATE TYPE review_status    AS ENUM ('assigned', 'in_progress', 'done');
 CREATE TYPE job_status       AS ENUM ('queued', 'running', 'done', 'failed', 'dead');
-CREATE TYPE job_type         AS ENUM ('ingest', 'extract_frames', 'ai_review', 'notify', 'archive', 'purge_frames');
+CREATE TYPE job_type         AS ENUM ('ingest', 'extract_frames', 'ai_review', 'notify', 'archive', 'purge_frames', 'sync_source');
+CREATE TYPE source_type       AS ENUM ('s3', 'url');                              -- extend later: gdrive, gcs, azure
+CREATE TYPE source_status     AS ENUM ('connected', 'syncing', 'error', 'disabled');
 
 -- ---------- TENANCY & PEOPLE ----------
 CREATE TABLE clients (
@@ -57,10 +59,33 @@ CREATE TABLE checklists (
 );
 CREATE INDEX idx_checklists_client_active ON checklists (client_id) WHERE is_active;
 
+-- ---------- SOURCES (a pointer to a place full of videos: S3 prefix or enumerable URL) ----------
+CREATE TABLE sources (
+    id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    client_id         uuid NOT NULL REFERENCES clients(id),
+    label             text NOT NULL,                  -- "Halo — daily shift uploads"
+    type              source_type NOT NULL,
+    uri_prefix        text NOT NULL,                  -- s3://evas-videos/halo/  or  https://.../listing
+    credential_ref    text,                           -- name/ARN of a secret, NEVER the secret itself
+    sampling_override jsonb,                           -- applied to videos discovered here
+    status            source_status NOT NULL DEFAULT 'connected',
+    auto_sync         boolean NOT NULL DEFAULT false,  -- re-scan on schedule
+    last_synced_at    timestamptz,
+    last_error        text,
+    -- counts from the most recent scan: {"discovered":N,"registered":N,"skipped":N,"failed":N,"at":"..."}
+    -- persisted so a partial/failed sync cannot masquerade as complete.
+    last_sync_result  jsonb,
+    created_at        timestamptz NOT NULL DEFAULT now(),
+    deleted_at        timestamptz,
+    UNIQUE (client_id, uri_prefix)
+);
+CREATE INDEX idx_sources_client ON sources (client_id) WHERE deleted_at IS NULL;
+
 -- ---------- VIDEOS ----------
 CREATE TABLE videos (
     id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id         uuid NOT NULL REFERENCES clients(id),
+    source_id         uuid REFERENCES sources(id),    -- which source discovered this video (nullable)
     external_ref      text,                  -- client's own ID, e.g. "00043"
     original_filename text,
     source_uri        text NOT NULL,         -- s3://... or drive://... as registered by ingestion adapter
@@ -139,6 +164,21 @@ CREATE TABLE ai_frame_findings (
 );
 CREATE INDEX idx_aff_run ON ai_frame_findings (ai_run_id);
 CREATE INDEX idx_aff_flagged ON ai_frame_findings (ai_run_id) WHERE flagged;
+
+-- Milestone 3: clip-level (temporal) findings, mirroring ai_frame_findings.
+CREATE TABLE ai_clip_findings (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    ai_run_id    uuid NOT NULL REFERENCES ai_runs(id) ON DELETE CASCADE,
+    clip_id      uuid NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+    description  text,
+    -- findings mirror clip-scoped checklist item keys: {"is_sweeping": {"value": true, "confidence": 0.9}, ...}
+    findings     jsonb NOT NULL,
+    confidence   numeric(4,3),              -- min/avg confidence across items, for flagging
+    flagged      boolean NOT NULL DEFAULT false,  -- below threshold → human attention
+    UNIQUE (ai_run_id, clip_id)
+);
+CREATE INDEX idx_acf_run ON ai_clip_findings (ai_run_id);
+CREATE INDEX idx_acf_flagged ON ai_clip_findings (ai_run_id) WHERE flagged;
 
 -- ---------- HUMAN REVIEWS ----------
 CREATE TABLE human_reviews (
@@ -236,7 +276,8 @@ SELECT
         WHEN latest_ai.grade IS NOT NULL AND hr.grade IS NOT NULL
         THEN abs(latest_ai.grade - hr.grade)
     END AS grade_discrepancy,
-    v.uploaded_at
+    v.uploaded_at,
+    v.source_id
 FROM videos v
 LEFT JOIN LATERAL (
     SELECT grade, model FROM ai_runs

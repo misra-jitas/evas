@@ -25,6 +25,11 @@ htmlcov/
 exports/
 /tmp/evas/
 
+# Frontend (Vite + React)
+node_modules/
+frontend/dist/
+.vite/
+
 # Editors / OS
 .vscode/
 .idea/

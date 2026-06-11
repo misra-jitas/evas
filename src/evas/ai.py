@@ -38,8 +38,17 @@ class FrameReview:
     cost_usd: float
 
 
+CLIP_PROMPT_VERSION = "1.0.0"
+
+
 def load_prompt(version: str = PROMPT_VERSION) -> str:
     path = os.path.join(_PROMPTS_DIR, f"frame_review-{version}.txt")
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def load_clip_prompt(version: str = CLIP_PROMPT_VERSION) -> str:
+    path = os.path.join(_PROMPTS_DIR, f"clip_review-{version}.txt")
     with open(path, encoding="utf-8") as fh:
         return fh.read()
 
@@ -48,16 +57,31 @@ def _render_items_block(items: list[dict[str, Any]]) -> str:
     return "\n".join(f"- {it['key']} — {it.get('label', it['key'])}" for it in items)
 
 
+_CLIP_PROMPT = load_clip_prompt()
+
+
 def estimate_cost(tokens_in: int, tokens_out: int) -> float:
     return tokens_in * _PRICE_IN_PER_TOKEN + tokens_out * _PRICE_OUT_PER_TOKEN
 
 
+def _image_block(image_bytes: bytes, media_type: ImageMediaType) -> ImageBlockParam:
+    b64 = base64.standard_b64encode(image_bytes).decode("ascii")
+    return ImageBlockParam(
+        type="image", source={"type": "base64", "media_type": media_type, "data": b64}
+    )
+
+
 class AiReviewer:
-    def __init__(self, client: anthropic.Anthropic | None = None) -> None:
+    def __init__(
+        self,
+        client: anthropic.Anthropic | None = None,
+        prompt_version: str = PROMPT_VERSION,
+    ) -> None:
         s = get_settings()
         self._settings = s
         self._client = client or anthropic.Anthropic(api_key=s.anthropic_api_key)
-        self._prompt = load_prompt(PROMPT_VERSION)
+        self._prompt_version = prompt_version
+        self._prompt = load_prompt(prompt_version)
 
     @property
     def model(self) -> str:
@@ -65,22 +89,12 @@ class AiReviewer:
 
     @property
     def prompt_version(self) -> str:
-        return PROMPT_VERSION
+        return self._prompt_version
 
-    def review_frame(
-        self,
-        image_bytes: bytes,
-        items: list[dict[str, Any]],
-        media_type: ImageMediaType = "image/jpeg",
+    def _complete(
+        self, content: list[ImageBlockParam | TextBlockParam], items: list[dict[str, Any]]
     ) -> FrameReview:
-        prompt = self._prompt.format(items_block=_render_items_block(items))
-        b64 = base64.standard_b64encode(image_bytes).decode("ascii")
-        image_block = ImageBlockParam(
-            type="image",
-            source={"type": "base64", "media_type": media_type, "data": b64},
-        )
-        text_block = TextBlockParam(type="text", text=prompt)
-        messages: list[MessageParam] = [{"role": "user", "content": [image_block, text_block]}]
+        messages: list[MessageParam] = [{"role": "user", "content": content}]
         message = self._client.messages.create(
             model=self._settings.ai_model,
             max_tokens=self._settings.ai_max_tokens,
@@ -97,6 +111,33 @@ class AiReviewer:
             tokens_out=tokens_out,
             cost_usd=estimate_cost(tokens_in, tokens_out),
         )
+
+    def review_frame(
+        self,
+        image_bytes: bytes,
+        items: list[dict[str, Any]],
+        media_type: ImageMediaType = "image/jpeg",
+    ) -> FrameReview:
+        prompt = self._prompt.format(items_block=_render_items_block(items))
+        content: list[ImageBlockParam | TextBlockParam] = [
+            _image_block(image_bytes, media_type),
+            TextBlockParam(type="text", text=prompt),
+        ]
+        return self._complete(content, items)
+
+    def review_clip(
+        self,
+        images: list[bytes],
+        items: list[dict[str, Any]],
+        media_type: ImageMediaType = "image/jpeg",
+    ) -> FrameReview:
+        """Review a temporal clip from its ordered frame sequence."""
+        prompt = _CLIP_PROMPT.format(items_block=_render_items_block(items), n=len(images))
+        content: list[ImageBlockParam | TextBlockParam] = [
+            _image_block(img, media_type) for img in images
+        ]
+        content.append(TextBlockParam(type="text", text=prompt))
+        return self._complete(content, items)
 
 
 def _parse_json_response(text: str) -> dict[str, Any]:
@@ -134,16 +175,16 @@ def _normalize_findings(
 class StubReviewer:
     """Deterministic offline reviewer for local dev (EVAS_AI_STUB=true).
 
-    Produces stable findings derived from the frame bytes so the pipeline runs
+    Produces stable findings derived from the image bytes so the pipeline runs
     end-to-end without calling Anthropic. No tokens, no cost.
     """
 
     model = "stub"
-    prompt_version = PROMPT_VERSION
 
-    def review_frame(
-        self, image_bytes: bytes, items: list[dict[str, Any]], media_type: str = "image/jpeg"
-    ) -> FrameReview:
+    def __init__(self, prompt_version: str = PROMPT_VERSION) -> None:
+        self.prompt_version = prompt_version
+
+    def _findings(self, image_bytes: bytes, items: list[dict[str, Any]]) -> FrameReview:
         seed = sum(image_bytes[:64])
         findings = {
             item["key"]: {"value": (seed + i) % 2 == 0, "confidence": 0.9}
@@ -157,9 +198,23 @@ class StubReviewer:
             cost_usd=0.0,
         )
 
+    def review_frame(
+        self, image_bytes: bytes, items: list[dict[str, Any]], media_type: str = "image/jpeg"
+    ) -> FrameReview:
+        return self._findings(image_bytes, items)
 
-def get_reviewer() -> AiReviewer | StubReviewer:
-    """Return the configured reviewer: the offline stub when EVAS_AI_STUB is set."""
+    def review_clip(
+        self, images: list[bytes], items: list[dict[str, Any]], media_type: str = "image/jpeg"
+    ) -> FrameReview:
+        return self._findings(b"".join(images[:1]) or b"\x00", items)
+
+
+def get_reviewer(prompt_version: str | None = None) -> AiReviewer | StubReviewer:
+    """Return the configured reviewer: the offline stub when EVAS_AI_STUB is set.
+
+    prompt_version overrides the active frame-prompt version (used by prompt A/B).
+    """
+    version = prompt_version or PROMPT_VERSION
     if get_settings().ai_stub:
-        return StubReviewer()
-    return AiReviewer()
+        return StubReviewer(prompt_version=version)
+    return AiReviewer(prompt_version=version)

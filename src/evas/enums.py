@@ -63,3 +63,16 @@ class JobType(enum.StrEnum):
     notify = "notify"
     archive = "archive"
     purge_frames = "purge_frames"
+    sync_source = "sync_source"
+
+
+class SourceType(enum.StrEnum):
+    s3 = "s3"
+    url = "url"  # extend later: gdrive, gcs, azure
+
+
+class SourceStatus(enum.StrEnum):
+    connected = "connected"
+    syncing = "syncing"
+    error = "error"
+    disabled = "disabled"
