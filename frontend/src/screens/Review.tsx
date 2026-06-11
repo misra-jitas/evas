@@ -127,7 +127,7 @@ function ReviewWorkbench({
   const [confirmDlg, setConfirmDlg] = useState(false);
   const [flash, setFlash] = useState<{ m: string; action?: { label: string; fn: () => void } } | null>(null);
   const [playing, setPlaying] = useState(false);
-  const [history, setHistory] = useState<{ frames: Frame[]; label: string }[]>([]);
+  const [, setHistory] = useState<{ frames: Frame[]; label: string }[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [saved, setSaved] = useState(true);
 

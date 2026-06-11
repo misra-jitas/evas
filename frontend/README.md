@@ -1,7 +1,7 @@
 # EVAS Web UI
 
 Vite + React + TypeScript frontend for EVAS — a faithful port of the Claude Design
-"instrument-panel" prototype. Three surfaces in one app, selected at login:
+"instrument-panel" prototype. Six surfaces in one app, selected at login:
 
 - **Reviewer Workbench** — Queue → keyboard-first Review screen (derived grade,
   three-state checklist, undo/autosave, instant submit→next, fading shortcut hints).
@@ -11,6 +11,7 @@ Vite + React + TypeScript frontend for EVAS — a faithful port of the Claude De
 - **AI Review** — agent observability: live pulse, aggregate strip (by model /
   prompt), runs log, run drill-down.
 - **Client Portal** — read-only, tenancy-isolated (no cost/reviewer/model/confidence).
+- **Clients** — admin CRUD (add/rename/delete) with optimistic updates.
 
 Design language: IBM Plex Sans + Mono, hairline grid, one cobalt accent, strict +
 colorblind-safe status colors, light/dark via `[data-theme]`, EN/ES toggle.
@@ -27,30 +28,25 @@ Run the backend separately (`.venv/bin/python -m uvicorn evas.api.app:app`). The
 server proxies `/api/*` to it, so no CORS setup is needed.
 
 ```bash
+npm run lint           # eslint .
 npm run typecheck      # tsc --noEmit
+npm run test           # vitest run
 npm run build          # tsc + vite build -> dist/
 ```
 
 ## Live API vs mock
 
-Screens fetch from the live FastAPI endpoints and **fall back to bundled mock
-fixtures** when the backend is unreachable or returns nothing — so the UI always
-renders, even against an empty DB. Currently wired live (with fallback):
-
-| Screen | Endpoint |
-|---|---|
-| Sources list / sync | `GET /sources`, `POST /sources/{id}/sync` |
-| AI Review runs / re-run | `GET /ai/runs`, `POST /ai/runs/{id}/rerun` |
-| Dashboard pipeline "failed" | `GET /admin/metrics` |
-| Client Portal list | `GET /portal/videos` |
+All screens fetch from the live FastAPI endpoints: reviewer Queue (live board) and
+Review (human-review writes), Dashboard/Videos/Jobs, AI Review (runs + drill-down +
+re-run), Sources (CRUD + sync), Client Portal, Clients (CRUD), and real video/frame
+images.
 
 Auth: role-based login mirrors the design. When `VITE_EVAS_BOOTSTRAP_TOKEN` is set
 (see `.env.example`), login also mints a real JWT via `POST /auth/token`
 (`X-Bootstrap-Token`) and attaches it as `Authorization: Bearer …` to API calls.
 
-**Gaps that stay on mock** (no clean endpoint yet): the reviewer Queue + Review
-interaction model (frame-level findings and human-review writes), Dashboard
-discrepancy/throughput/cost tables, the Jobs list, and run drill-down frames.
+Mock fixtures (`src/data.ts`) remain only as an offline fallback on a few screens and
+for visuals the API doesn't serve (AI stats spark series, portal export layout).
 
 ## Serving in production
 

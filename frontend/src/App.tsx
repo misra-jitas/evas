@@ -223,8 +223,10 @@ export function App() {
   const t = useMemo(() => makeT(lang), [lang]);
   const portalClient = D.CLIENTS[0];
 
-  const order: Record<string, number> = { rush: 0, high: 1, normal: 2 };
-  const sortedQueue = useMemo(() => [...D.QUEUE].sort((a, b) => order[a.priority] - order[b.priority] || b.assignedMins - a.assignedMins), []);
+  const sortedQueue = useMemo(() => {
+    const order: Record<string, number> = { rush: 0, high: 1, normal: 2 };
+    return [...D.QUEUE].sort((a, b) => order[a.priority] - order[b.priority] || b.assignedMins - a.assignedMins);
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);

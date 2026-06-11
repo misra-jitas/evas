@@ -2,7 +2,7 @@
 // log, run drill-down. Runs list + Re-run hit the live API (GET /ai/runs,
 // POST /ai/runs/{id}/rerun); the sparkline aggregate strip and drill-down keep
 // the prototype's rich mock visuals (the live /ai/stats has no spark series).
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, useLive } from "../api";
 import {
   Btn,
@@ -266,7 +266,9 @@ function RunDetail({ t, runId, onBack, onOpenDiscrepancy }: { t: TFn; runId: str
   const scene = sceneOf(run.scene);
   const selected = run.frames.find((f) => f.id === selFrame) || run.frames[0];
 
-  const humanGrade = run.grade != null ? Math.round((run.grade + (Math.random() > 0.5 ? -2 : 1.5)) * 2) / 2 : null;
+  // Mock visual: fabricate a stable per-run human grade (no live source yet).
+  const jitter = run.id.charCodeAt(run.id.length - 1) % 2 ? -2 : 1.5;
+  const humanGrade = run.grade != null ? Math.round((run.grade + jitter) * 2) / 2 : null;
   const gap = humanGrade != null && run.grade != null ? Math.abs(run.grade - humanGrade) : null;
   const lowConf = run.frames.filter((f) => f.items.some((i) => i.conf < 0.6));
   const tokPerFrame = run.frames.length ? run.cost / run.frames.length : 0;
