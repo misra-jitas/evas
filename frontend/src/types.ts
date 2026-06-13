@@ -227,6 +227,10 @@ export interface BoardVideo {
   gap: number | null;
   scene: string;
   uploaded: string;
+  duration: number | null;
+  frames: number;
+  checklist: string | null;
+  source: string | null;
 }
 
 export interface PortalVideo {

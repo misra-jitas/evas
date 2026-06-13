@@ -81,7 +81,12 @@ def handle_ingest(session: Session, job: ProcessingJob) -> None:
             client_id=client_id,
             source_id=uuid.UUID(str(source_ref)) if source_ref else None,
             external_ref=payload.get("external_ref"),
-            original_filename=payload.get("original_filename"),
+            # Default the human-facing reference to the object's filename when the
+            # caller didn't supply one (e.g. source sync), so the board's
+            # Reference column is meaningful instead of a bare id.
+            original_filename=payload.get("original_filename")
+            or os.path.basename(source_uri)
+            or None,
             source_uri=source_uri,
             file_hash=file_hash,
             size_bytes=probe.size_bytes,

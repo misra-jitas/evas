@@ -39,6 +39,11 @@ class ReviewBoardRow(BaseModel):
     grade_discrepancy: float | None
     uploaded_at: datetime.datetime
     source_id: uuid.UUID | None = None
+    source_label: str | None = None
+    original_filename: str | None = None
+    duration_seconds: float | None = None
+    frame_count: int = 0
+    checklist_name: str | None = None
 
 
 class FrameFindingOut(BaseModel):

@@ -217,11 +217,16 @@ interface RawBoard {
   grade_discrepancy: number | null;
   uploaded_at: string;
   source_id: string | null;
+  source_label: string | null;
+  original_filename: string | null;
+  duration_seconds: number | null;
+  frame_count: number;
+  checklist_name: string | null;
 }
 function adaptBoard(r: RawBoard): BoardVideo {
   return {
     id: r.id,
-    ref: r.external_ref || r.id.slice(0, 8),
+    ref: r.external_ref || r.original_filename || r.id.slice(0, 8),
     clientId: r.client_id,
     clientObj: clientFromId(r.client_id),
     status: r.status,
@@ -232,6 +237,10 @@ function adaptBoard(r: RawBoard): BoardVideo {
     gap: r.grade_discrepancy,
     scene: sceneFor(r.id),
     uploaded: r.uploaded_at.slice(0, 10),
+    duration: r.duration_seconds,
+    frames: r.frame_count,
+    checklist: r.checklist_name,
+    source: r.source_label,
   };
 }
 

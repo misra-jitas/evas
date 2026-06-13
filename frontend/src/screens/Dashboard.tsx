@@ -3,9 +3,17 @@
 // reviewer-throughput have no API endpoint yet and show honest empty states.
 import { useState } from "react";
 import { api, useLive } from "../api";
-import { ClientChip, EmptyInline, FrameThumb, Grade, Ico, Row, SearchBox, Select } from "../components";
-import { sceneOf } from "../data";
+import { ClientChip, EmptyInline, Grade, Ico, Row, SearchBox, Select } from "../components";
 import type { BoardVideo, TFn } from "../types";
+
+const VIDEO_COLS = "1.2fr 0.9fr 0.9fr 64px 56px 1fr 104px 48px 48px";
+
+function fmtDur(s: number | null): string {
+  if (s == null) return "—";
+  const m = Math.floor(s / 60);
+  const sec = Math.round(s % 60);
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
 
 interface Metrics {
   dead_jobs: number;
@@ -186,24 +194,24 @@ function VideosView({ t, onOpenReview }: { t: TFn; onOpenReview: (id: string) =>
           <SearchBox q={q} setQ={setQ} t={t} />
         </div>
         <div className="panel" style={{ overflow: "hidden" }}>
-          <Row head cols="50px 1.1fr 1.3fr 90px 110px 80px 80px">
-            {["", t("queue.ref"), t("queue.client"), t("queue.scene"), t("portal.status"), "AI", ""].map((h, i) => (
-              <span key={i} className="label" style={{ textAlign: i === 5 ? "right" : "left" }}>{h}</span>
+          <Row head cols={VIDEO_COLS}>
+            {[t("queue.ref"), t("queue.client"), "Source", "Duration", "Frames", "Checklist", t("portal.status"), "AI", "H"].map((h, i) => (
+              <span key={i} className="label" style={{ textAlign: i >= 3 && i <= 4 ? "right" : i >= 7 ? "right" : "left" }}>{h}</span>
             ))}
           </Row>
           {rows.length === 0 ? (
             <EmptyInline icon="film" msg="No videos yet — register a source or run the demo." />
           ) : rows.map((v, i) => (
-            <Row key={v.id} cols="50px 1.1fr 1.3fr 90px 110px 80px 80px" last={i === rows.length - 1} onClick={() => onOpenReview(v.id)}>
-              <FrameThumb frame={{ hue: sceneOf(v.scene).hue }} style={{ width: 40, height: 24 }} showHud={false} />
-              <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{v.ref}</span>
+            <Row key={v.id} cols={VIDEO_COLS} last={i === rows.length - 1} onClick={() => onOpenReview(v.id)}>
+              <span className="mono" style={{ fontWeight: 600, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.ref}</span>
               <ClientChip client={v.clientObj} />
-              <span className="mono" style={{ fontSize: 11, color: "var(--ink-2)" }}>{sceneOf(v.scene).label}</span>
+              <span style={{ fontSize: 12, color: v.source ? "var(--ink-2)" : "var(--ink-4)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.source || "—"}</span>
+              <span className="mono tnum" style={{ textAlign: "right", fontSize: 12, color: "var(--ink-2)" }}>{fmtDur(v.duration)}</span>
+              <span className="mono tnum" style={{ textAlign: "right", fontSize: 12, color: "var(--ink-2)" }}>{v.frames || "—"}</span>
+              <span style={{ fontSize: 12, color: "var(--ink-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.checklist || "—"}</span>
               <StatusPill status={PILL_FOR[v.status] || "processing"} t={t} />
-              <span style={{ textAlign: "right" }}><Grade value={v.aiGrade} size={12.5} /></span>
-              <span style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end", color: "var(--ink-3)", fontSize: 11 }}>
-                <Ico name="eye" size={13} /> view
-              </span>
+              <span style={{ textAlign: "right" }}><Grade value={v.aiGrade} size={12} /></span>
+              <span style={{ textAlign: "right" }}><Grade value={v.humanGrade} size={12} muted /></span>
             </Row>
           ))}
         </div>

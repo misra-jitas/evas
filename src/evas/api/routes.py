@@ -72,18 +72,41 @@ def list_videos(
     scope = tenancy_client_id(user)
     if scope is not None:
         client_id = scope
-    sql = "SELECT * FROM video_review_board WHERE 1=1"
+    # Enrich the (locked) view with duration, frame count, and the checklist
+    # name actually used — without modifying the view itself.
+    sql = """
+        SELECT b.*,
+               v.original_filename,
+               v.duration_seconds,
+               src.label AS source_label,
+               (SELECT count(*) FROM frames f WHERE f.video_id = b.id) AS frame_count,
+               COALESCE(run_cl.name, active_cl.name) AS checklist_name
+        FROM video_review_board b
+        JOIN videos v ON v.id = b.id
+        LEFT JOIN sources src ON src.id = b.source_id
+        LEFT JOIN LATERAL (
+            SELECT c.name FROM ai_runs r JOIN checklists c ON c.id = r.checklist_id
+            WHERE r.video_id = b.id AND r.status = 'completed'
+            ORDER BY r.completed_at DESC LIMIT 1
+        ) run_cl ON true
+        LEFT JOIN LATERAL (
+            SELECT c.name FROM checklists c
+            WHERE c.client_id = b.client_id AND c.is_active
+            ORDER BY c.version DESC LIMIT 1
+        ) active_cl ON true
+        WHERE 1=1
+    """
     params: dict[str, Any] = {}
     if client_id is not None:
-        sql += " AND client_id = :client_id"
+        sql += " AND b.client_id = :client_id"
         params["client_id"] = str(client_id)
     if source_id is not None:
-        sql += " AND source_id = :source_id"
+        sql += " AND b.source_id = :source_id"
         params["source_id"] = str(source_id)
     if status is not None:
-        sql += " AND status = :status"
+        sql += " AND b.status = :status"
         params["status"] = status
-    sql += " ORDER BY uploaded_at DESC LIMIT :limit OFFSET :offset"
+    sql += " ORDER BY b.uploaded_at DESC LIMIT :limit OFFSET :offset"
     params["limit"] = limit
     params["offset"] = offset
     rows = session.execute(text(sql), params).mappings().all()
