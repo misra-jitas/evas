@@ -167,5 +167,3 @@ def test_checklist_routes_admin_only(auth_headers, make_user) -> None:
         headers={"Authorization": f"Bearer {reviewer_token}"},
     )
     assert r.status_code == 403
-
-
