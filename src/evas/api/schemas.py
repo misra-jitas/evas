@@ -198,6 +198,26 @@ class ClientOut(BaseModel):
     video_count: int
 
 
+# ---- Checklists (review config: items + prompt framing) ----
+class ChecklistSave(BaseModel):
+    name: str
+    items: list[dict[str, Any]]
+    prompt_template: str | None = None
+    grading_mode: str = "derived"
+
+
+class ChecklistOut(BaseModel):
+    id: uuid.UUID
+    client_id: uuid.UUID
+    name: str
+    version: int
+    grading_mode: str
+    items: list[dict[str, Any]]
+    prompt_template: str | None
+    is_active: bool
+    created_at: datetime.datetime
+
+
 # ---- Sources ----
 class SourceCreate(BaseModel):
     client_id: uuid.UUID

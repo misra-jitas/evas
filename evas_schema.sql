@@ -53,6 +53,7 @@ CREATE TABLE checklists (
     -- items: [{"key":"two_hands","label":"Two hands visible","type":"boolean","weight":1.0},
     --         {"key":"holding_tool","label":"Hand holding tool","type":"boolean","weight":2.0}, ...]
     items         jsonb NOT NULL,
+    prompt_template text,                          -- UI-editable framing (migration 0004); AI layer appends the output contract. NULL = default framing
     is_active     boolean NOT NULL DEFAULT true,   -- only one active version per (client, name)
     created_at    timestamptz NOT NULL DEFAULT now(),
     UNIQUE (client_id, name, version)

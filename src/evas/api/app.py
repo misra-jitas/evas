@@ -13,6 +13,7 @@ from evas.api.admin_routes import router as admin_router
 from evas.api.ai_routes import router as ai_router
 from evas.api.auth_routes import router as auth_router
 from evas.api.billing_routes import router as billing_router
+from evas.api.checklists_routes import router as checklists_router
 from evas.api.clients_routes import router as clients_router
 from evas.api.clips_routes import router as clips_router
 from evas.api.human_reviews import router as human_reviews_router
@@ -36,6 +37,7 @@ def create_app() -> FastAPI:
     app.include_router(sources_router)
     app.include_router(ai_router)
     app.include_router(clients_router)
+    app.include_router(checklists_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:
