@@ -157,6 +157,14 @@ export interface AiRun {
   error?: string;
 }
 
+export interface Triage {
+  count: number;
+  lowConfidence: number;
+  nonCompliant: number;
+  sample: number;
+  indices: number[];
+}
+
 export type AiRunDetail = AiRun & {
   frames: Frame[];
   allCount: number;
@@ -164,6 +172,7 @@ export type AiRunDetail = AiRun & {
   items: RunChecklistItem[];
   humanGrade: number | null;
   gradeGap: number | null;
+  triage: Triage;
 };
 
 export interface SparkSet {

@@ -338,7 +338,7 @@ function getRun(id: string): AiRunDetail {
   for (let i = 0; i < r.flagged; i++) flaggedIdx.push(Math.floor((i + 1) * (r.total / (r.flagged + 1))));
   const allFrames = buildFrames(r.scene, r.total, flaggedIdx);
   const doneFrames = allFrames.slice(0, r.done);
-  return { ...r, frames: doneFrames, allCount: r.total, checklistId: "cl-mock", items: [], humanGrade: null, gradeGap: null };
+  return { ...r, frames: doneFrames, allCount: r.total, checklistId: "cl-mock", items: [], humanGrade: null, gradeGap: null, triage: { count: r.flagged, lowConfidence: r.flagged, nonCompliant: 0, sample: 0, indices: flaggedIdx } };
 }
 
 const PORTAL_VIDEOS: PortalVideo[] = [

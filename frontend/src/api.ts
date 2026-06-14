@@ -304,6 +304,7 @@ interface RawRunDetail {
   duration_seconds: number | null;
   cost: { tokens_in: number; tokens_out: number; cost_usd: number; cost_per_frame: number | null };
   issues: { flagged_count: number };
+  triage?: { count: number; frame_indices: number[]; counts: { low_confidence: number; non_compliant: number; sample: number } };
   human?: { grade: number | null; grade_gap: number | null };
   checklist?: {
     id: string;
@@ -387,6 +388,13 @@ function adaptRunDetail(r: RawRunDetail): AiRunDetail {
     flagged: r.issues?.flagged_count ?? 0,
     humanGrade: r.human?.grade ?? null,
     gradeGap: r.human?.grade_gap ?? null,
+    triage: {
+      count: r.triage?.count ?? 0,
+      lowConfidence: r.triage?.counts?.low_confidence ?? 0,
+      nonCompliant: r.triage?.counts?.non_compliant ?? 0,
+      sample: r.triage?.counts?.sample ?? 0,
+      indices: r.triage?.frame_indices ?? [],
+    },
     tokIn: r.cost.tokens_in,
     tokOut: r.cost.tokens_out,
     tokens: r.cost.tokens_in + r.cost.tokens_out,
@@ -626,6 +634,12 @@ export const api = {
   },
   rerun: (id: string, body?: { prompt_version?: string; checklist_id?: string }) =>
     request(`/ai/runs/${id}/rerun`, body ? jsonInit("POST", body) : { method: "POST" }),
+  listReviewers: () => request<{ id: string; name: string; role: string }[]>("/reviewers"),
+  sendToHuman: (runId: string, reviewerId: string) =>
+    request<{ review_id: string; reviewer_id: string }>(
+      `/ai/runs/${runId}/send-to-human`,
+      jsonInit("POST", { reviewer_id: reviewerId }),
+    ),
   adminMetrics: () =>
     request<{ dead_jobs: number; queue_depth: number; running_jobs: number; webhook_failures: number }>(
       "/admin/metrics",

@@ -260,9 +260,24 @@ function RunDetail({ t, runId, onBack, onOpenDiscrepancy }: { t: TFn; runId: str
   );
   const [rerunChecklist, setRerunChecklist] = useState<string>("");
   const [rerunBusy, setRerunBusy] = useState(false);
+  // Send-to-human controls.
+  const reviewers = useLive<{ id: string; name: string; role: string }[]>(() => api.listReviewers(), [], []);
+  const [reviewerId, setReviewerId] = useState("");
+  const [sendBusy, setSendBusy] = useState(false);
+  const [sent, setSent] = useState(false);
   useEffect(() => {
     if (run && run.frames[0]) setSelFrame((cur) => cur ?? run.frames[0].id);
   }, [run]);
+
+  function sendToHuman() {
+    if (!run || !reviewerId) return;
+    setSendBusy(true);
+    api
+      .sendToHuman(run.id, reviewerId)
+      .then(() => setSent(true))
+      .catch(() => {})
+      .finally(() => setSendBusy(false));
+  }
 
   function doRerun() {
     if (!run) return;
@@ -423,6 +438,36 @@ function RunDetail({ t, runId, onBack, onOpenDiscrepancy }: { t: TFn; runId: str
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            <div>
+              <div className="label" style={{ marginBottom: 9 }}>Send to human review</div>
+              <div className="panel" style={{ padding: 14 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                  <span className="mono tnum" style={{ fontSize: 22, fontWeight: 700, color: run.triage.count ? "var(--amber)" : "var(--green)" }}>{run.triage.count}</span>
+                  <span style={{ fontSize: 12.5, color: "var(--ink-2)" }}>frames to verify</span>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px", marginTop: 8, fontSize: 11.5, color: "var(--ink-3)" }}>
+                  <span><b style={{ color: "var(--ink-2)" }}>{run.triage.lowConfidence}</b> low-confidence</span>
+                  <span><b style={{ color: "var(--ink-2)" }}>{run.triage.nonCompliant}</b> AI-failed</span>
+                  <span><b style={{ color: "var(--ink-2)" }}>{run.triage.sample}</b> sampled</span>
+                </div>
+                {sent ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, color: "var(--green)", fontSize: 12.5 }}>
+                    <Ico name="check" size={15} /> Assigned to a reviewer.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                    <Select
+                      value={reviewerId}
+                      onChange={setReviewerId}
+                      options={[{ v: "", l: "Pick reviewer…" }, ...reviewers.data.map((u) => ({ v: u.id, l: `${u.name} (${u.role})` }))]}
+                    />
+                    <Btn kind="primary" size="sm" icon="user" disabled={!reviewerId || sendBusy} onClick={sendToHuman}>
+                      {sendBusy ? "Assigning…" : "Send"}
+                    </Btn>
+                  </div>
+                )}
+              </div>
+            </div>
             <div>
               <div className="label" style={{ marginBottom: 9 }}>{t("ai.issuespanel")}</div>
               <div className="panel" style={{ padding: 14 }}>

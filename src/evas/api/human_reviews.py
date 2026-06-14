@@ -104,6 +104,20 @@ def assign_review(
     return _to_out(hr)
 
 
+@router.get("/reviewers")
+def list_reviewers(
+    session: Session = Depends(get_session),
+    user: User = Depends(_staff),
+) -> list[dict[str, str]]:
+    """Active reviewer/admin users — for assigning reviews (e.g. send-to-human)."""
+    rows = session.scalars(
+        select(User)
+        .where(User.is_active.is_(True), User.role.in_([UserRole.reviewer, UserRole.admin]))
+        .order_by(User.full_name)
+    ).all()
+    return [{"id": str(u.id), "name": u.full_name, "role": u.role.value} for u in rows]
+
+
 @router.get("/human-reviews", response_model=list[HumanReviewOut])
 def list_reviews(
     session: Session = Depends(get_session),

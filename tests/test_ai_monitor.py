@@ -105,6 +105,36 @@ def test_rerun_with_checklist_override(auth_headers, fake_s3, fake_ai, sample_vi
     assert bogus.status_code == 404
 
 
+def test_run_detail_has_triage(auth_headers, fake_s3, fake_ai, sample_video_bytes) -> None:
+    _ingest(fake_s3, sample_video_bytes)
+    run_id = client.get("/ai/runs", headers=auth_headers).json()[0]["id"]
+    triage = client.get(f"/ai/runs/{run_id}", headers=auth_headers).json()["triage"]
+    assert "counts" in triage and triage["count"] >= 1
+    assert triage["counts"]["low_confidence"] >= 1  # fake reviewer makes holding_broom low-conf
+
+
+def test_send_to_human(auth_headers, make_user, fake_s3, fake_ai, sample_video_bytes) -> None:
+    video_id = _ingest(fake_s3, sample_video_bytes)
+    run_id = client.get("/ai/runs", headers=auth_headers).json()[0]["id"]
+    reviewer_id, _ = make_user(role=UserRole.reviewer)
+
+    res = client.post(
+        f"/ai/runs/{run_id}/send-to-human",
+        json={"reviewer_id": str(reviewer_id)},
+        headers=auth_headers,
+    )
+    assert res.status_code == 201, res.text
+    revs = client.get(f"/videos/{video_id}/human-reviews", headers=auth_headers).json()
+    assert any(r["reviewer_id"] == str(reviewer_id) for r in revs)
+
+    bogus = client.post(
+        f"/ai/runs/{run_id}/send-to-human",
+        json={"reviewer_id": str(uuid.uuid4())},
+        headers=auth_headers,
+    )
+    assert bogus.status_code == 404
+
+
 def test_runs_filters(auth_headers, fake_s3, fake_ai, sample_video_bytes) -> None:
     _ingest(fake_s3, sample_video_bytes)
     assert len(client.get("/ai/runs?has_issues=true", headers=auth_headers).json()) == 1

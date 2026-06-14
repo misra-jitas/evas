@@ -15,12 +15,15 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from evas import storage
-from evas.api.schemas import JobAccepted, RerunRequest
+from evas.api.schemas import JobAccepted, RerunRequest, SendToHumanRequest
+from evas.audit import write_audit
 from evas.auth import require_roles
+from evas.checklists import frame_items
 from evas.db import get_session
-from evas.enums import JobType, RunStatus, UserRole
+from evas.enums import JobType, ReviewStatus, RunStatus, UserRole
 from evas.jobs import enqueue
-from evas.models import AiFrameFinding, AiRun, Checklist, Frame, HumanReview, User, Video
+from evas.models import AiFrameFinding, AiRun, Checklist, Client, Frame, HumanReview, User, Video
+from evas.triage import client_triage_policy, compute_triage
 
 router = APIRouter(prefix="/ai", tags=["ai-monitor"])
 _admin = require_roles(UserRole.admin)
@@ -268,6 +271,16 @@ def get_run(
     )
     frames_done = len(frames)
 
+    # Frame triage: which frames a human should verify (derived, no persistence).
+    client_obj = session.get(Client, video.client_id)
+    frame_defs = frame_items(checklist.items) if checklist else []
+    triage = compute_triage(
+        str(run.id),
+        [{"frame_index": fr["frame_index"], "findings": fr["findings"]} for fr in frames],
+        frame_defs,
+        client_triage_policy(client_obj.sampling_config if client_obj else None),
+    )
+
     return {
         "id": str(run.id),
         "video_id": str(run.video_id),
@@ -301,12 +314,59 @@ def get_run(
             "flagged_frames": flagged_indices,
             "flagged_count": len(flagged_indices),
         },
+        "triage": triage,
         "human": {
             "grade": float(human_grade) if human_grade is not None else None,
             "grade_gap": round(grade_gap, 2) if grade_gap is not None else None,
         },
         "frames": frames,
     }
+
+
+@router.post("/runs/{run_id}/send-to-human", status_code=201)
+def send_to_human(
+    run_id: uuid.UUID,
+    req: SendToHumanRequest,
+    session: Session = Depends(get_session),
+    user: User = Depends(_admin),
+) -> dict[str, Any]:
+    """Assign a human review for this run's video to a reviewer.
+
+    The triaged frames (low-confidence + AI-failed + sample) are reported back so
+    the caller can show the reviewer what to verify; they are derived on demand
+    from the run, not persisted (no schema change).
+    """
+    run = session.get(AiRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    reviewer = session.get(User, req.reviewer_id)
+    if (
+        reviewer is None
+        or not reviewer.is_active
+        or reviewer.role
+        not in (
+            UserRole.reviewer,
+            UserRole.admin,
+        )
+    ):
+        raise HTTPException(status_code=404, detail="reviewer not found or not eligible")
+    hr = HumanReview(
+        video_id=run.video_id,
+        checklist_id=run.checklist_id,
+        reviewer_id=reviewer.id,
+        status=ReviewStatus.assigned,
+    )
+    session.add(hr)
+    session.flush()
+    write_audit(
+        session,
+        entity_type="human_review",
+        entity_id=hr.id,
+        action="assigned",
+        new_value={"reviewer_id": str(reviewer.id), "via": "ai_review_send_to_human"},
+        user_id=user.id,
+    )
+    return {"review_id": str(hr.id), "reviewer_id": str(reviewer.id)}
 
 
 @router.post("/runs/{run_id}/rerun", response_model=JobAccepted, status_code=202)
