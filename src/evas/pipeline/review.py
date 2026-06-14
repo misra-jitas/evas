@@ -94,7 +94,12 @@ def _new_run(session: Session, video: Video, checklist: Checklist, reviewer: Any
 def _review_frames(session: Session, job: ProcessingJob, video: Video) -> None:
     checklist = _resolve_checklist(session, video, job)
     items = frame_items(checklist.items)
-    reviewer = ai.get_reviewer(prompt_version=job.payload.get("prompt_version"))
+    pv = job.payload.get("prompt_version")
+    # A/B (explicit prompt_version) pins a versioned prompt file; otherwise use
+    # the checklist's own UI-authored framing (or the default when unset).
+    reviewer = ai.get_reviewer(
+        prompt_version=pv, prompt_template=None if pv else checklist.prompt_template
+    )
     threshold = get_settings().confidence_flag_threshold
 
     run = _new_run(session, video, checklist, reviewer)
@@ -162,7 +167,10 @@ def _review_clips(session: Session, job: ProcessingJob, video: Video) -> None:
     items = clip_items(checklist.items)
     if not items:
         raise ValueError("checklist has no clip-scoped items")
-    reviewer = ai.get_reviewer(prompt_version=job.payload.get("prompt_version"))
+    pv = job.payload.get("prompt_version")
+    reviewer = ai.get_reviewer(
+        prompt_version=pv, prompt_template=None if pv else checklist.prompt_template
+    )
     threshold = get_settings().confidence_flag_threshold
 
     clips = session.scalars(

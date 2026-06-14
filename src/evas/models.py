@@ -90,6 +90,7 @@ class Checklist(Base):
         server_default=text("'derived'"),
     )
     items: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    prompt_template: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     created_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=_now

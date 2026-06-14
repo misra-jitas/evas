@@ -217,11 +217,16 @@ interface RawBoard {
   grade_discrepancy: number | null;
   uploaded_at: string;
   source_id: string | null;
+  source_label: string | null;
+  original_filename: string | null;
+  duration_seconds: number | null;
+  frame_count: number;
+  checklist_name: string | null;
 }
 function adaptBoard(r: RawBoard): BoardVideo {
   return {
     id: r.id,
-    ref: r.external_ref || r.id.slice(0, 8),
+    ref: r.external_ref || r.original_filename || r.id.slice(0, 8),
     clientId: r.client_id,
     clientObj: clientFromId(r.client_id),
     status: r.status,
@@ -232,6 +237,10 @@ function adaptBoard(r: RawBoard): BoardVideo {
     gap: r.grade_discrepancy,
     scene: sceneFor(r.id),
     uploaded: r.uploaded_at.slice(0, 10),
+    duration: r.duration_seconds,
+    frames: r.frame_count,
+    checklist: r.checklist_name,
+    source: r.source_label,
   };
 }
 
@@ -437,6 +446,37 @@ export interface ClientInput {
   video_archive_days?: number | null;
 }
 
+export type ItemType = "boolean" | "category" | "multi_boolean" | "text" | "number";
+export interface ChecklistItem {
+  key: string;
+  label: string;
+  type: ItemType;
+  weight?: number;
+  scope?: "frame" | "clip";
+  options?: string[] | { key: string; label: string }[];
+  compliant_values?: string[];
+  compliant_range?: [number, number];
+  min?: number;
+  max?: number;
+}
+export interface ChecklistConfig {
+  id: string;
+  client_id: string;
+  name: string;
+  version: number;
+  grading_mode: string;
+  items: ChecklistItem[];
+  prompt_template: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+export interface ChecklistSave {
+  name: string;
+  items: ChecklistItem[];
+  prompt_template?: string | null;
+  grading_mode?: string;
+}
+
 function jsonInit(method: string, body: unknown): RequestInit {
   return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
 }
@@ -452,6 +492,13 @@ export const api = {
   updateClient: (id: string, body: Partial<ClientInput>) =>
     request<ClientRecord>(`/clients/${id}`, jsonInit("PATCH", body)),
   deleteClient: (id: string) => request(`/clients/${id}`, { method: "DELETE" }),
+  // Review config (checklist items + prompt framing), per client, versioned.
+  listChecklists: (clientId: string) =>
+    request<ChecklistConfig[]>(`/clients/${clientId}/checklists`),
+  activeChecklist: (clientId: string) =>
+    request<ChecklistConfig>(`/clients/${clientId}/checklists/active`),
+  saveChecklist: (clientId: string, body: ChecklistSave) =>
+    request<ChecklistConfig>(`/clients/${clientId}/checklists`, jsonInit("POST", body)),
   listSources: () =>
     warmClients()
       .then(() => request<RawSource[]>("/sources"))

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api, type ClientInput, type ClientRecord, useLive } from "../api";
 import { Btn, EmptyInline, Field, fieldInput, Ico, Kebab, Modal, Row } from "../components";
 import type { TFn } from "../types";
+import { ChecklistEditor } from "./ChecklistEditor";
 
 const COLS = "1.4fr 1fr 90px 110px 110px 44px";
 
@@ -11,6 +12,7 @@ export function ClientsScreen({ t }: { t: TFn }) {
   const live = useLive<ClientRecord[]>(() => api.listClients(), []);
   const [clients, setClients] = useState<ClientRecord[]>(live.data);
   const [editing, setEditing] = useState<ClientRecord | "new" | null>(null);
+  const [configFor, setConfigFor] = useState<ClientRecord | null>(null);
 
   useEffect(() => setClients(live.data), [live.data]);
 
@@ -73,12 +75,13 @@ export function ClientsScreen({ t }: { t: TFn }) {
               <span className="mono tnum" style={{ fontSize: 13, fontWeight: 600 }}>{c.video_count}</span>
               <span className="mono tnum" style={{ fontSize: 12, color: "var(--ink-3)" }}>{c.frame_retention_days != null ? `${c.frame_retention_days}d` : "—"}</span>
               <span className="mono tnum" style={{ fontSize: 12, color: "var(--ink-3)" }}>{c.video_archive_days != null ? `${c.video_archive_days}d` : "—"}</span>
-              <Kebab items={[{ label: t("clients.edit"), icon: "sliders", onClick: () => setEditing(c) }, { label: t("clients.delete"), icon: "x", danger: true, onClick: () => remove(c) }]} />
+              <Kebab items={[{ label: t("clients.edit"), icon: "sliders", onClick: () => setEditing(c) }, { label: t("clients.reviewConfig"), icon: "list", onClick: () => setConfigFor(c) }, { label: t("clients.delete"), icon: "x", danger: true, onClick: () => remove(c) }]} />
             </Row>
           ))}
         </div>
       </div>
       {editing && <ClientModal t={t} initial={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSave={save} />}
+      {configFor && <ChecklistEditor t={t} client={configFor} onClose={() => setConfigFor(null)} />}
     </div>
   );
 }
