@@ -61,6 +61,50 @@ def test_runs_list(auth_headers, fake_s3, fake_ai, sample_video_bytes) -> None:
     assert run["flagged_frames"] >= 1  # fake reviewer makes holding_broom low-confidence
 
 
+def test_runs_carry_checklist_provenance(
+    auth_headers, fake_s3, fake_ai, sample_video_bytes
+) -> None:
+    _ingest(fake_s3, sample_video_bytes)
+    run = client.get("/ai/runs", headers=auth_headers).json()[0]
+    assert run["checklist_name"] == EXAMPLE_CHECKLIST_NAME
+    assert run["checklist_version"] == 1
+    assert run["prompt_is_custom"] is False  # seeded checklist has no prompt_template
+
+    run_id = run["id"]
+    detail = client.get(f"/ai/runs/{run_id}", headers=auth_headers).json()
+    cl = detail["checklist"]
+    assert cl["name"] == EXAMPLE_CHECKLIST_NAME and cl["version"] == 1
+    assert len(cl["items"]) == len(EXAMPLE_CHECKLIST_ITEMS)  # item defs for type-aware rendering
+
+
+def test_rerun_with_checklist_override(auth_headers, fake_s3, fake_ai, sample_video_bytes) -> None:
+    video_id = _ingest(fake_s3, sample_video_bytes)
+    run_id = client.get("/ai/runs", headers=auth_headers).json()[0]["id"]
+    with session_scope() as s:
+        checklist_id = s.scalars(select(Checklist.id)).first()
+
+    ok = client.post(
+        f"/ai/runs/{run_id}/rerun",
+        json={"checklist_id": str(checklist_id)},
+        headers=auth_headers,
+    )
+    assert ok.status_code == 202, ok.text
+    with session_scope() as s:
+        job = s.scalars(
+            select(ProcessingJob)
+            .where(ProcessingJob.job_type == JobType.ai_review, ProcessingJob.video_id == video_id)
+            .order_by(ProcessingJob.queued_at.desc())
+        ).first()
+        assert job is not None and job.payload.get("checklist_id") == str(checklist_id)
+
+    bogus = client.post(
+        f"/ai/runs/{run_id}/rerun",
+        json={"checklist_id": str(uuid.uuid4())},
+        headers=auth_headers,
+    )
+    assert bogus.status_code == 404
+
+
 def test_runs_filters(auth_headers, fake_s3, fake_ai, sample_video_bytes) -> None:
     _ingest(fake_s3, sample_video_bytes)
     assert len(client.get("/ai/runs?has_issues=true", headers=auth_headers).json()) == 1

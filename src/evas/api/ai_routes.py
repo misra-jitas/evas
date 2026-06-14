@@ -15,12 +15,12 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from evas import storage
-from evas.api.schemas import JobAccepted
+from evas.api.schemas import JobAccepted, RerunRequest
 from evas.auth import require_roles
 from evas.db import get_session
 from evas.enums import JobType, RunStatus, UserRole
 from evas.jobs import enqueue
-from evas.models import AiFrameFinding, AiRun, Frame, HumanReview, User, Video
+from evas.models import AiFrameFinding, AiRun, Checklist, Frame, HumanReview, User, Video
 
 router = APIRouter(prefix="/ai", tags=["ai-monitor"])
 _admin = require_roles(UserRole.admin)
@@ -71,11 +71,15 @@ def list_runs(
             AiRun,
             Video.external_ref,
             Video.client_id,
+            Checklist.name.label("checklist_name"),
+            Checklist.version.label("checklist_version"),
+            Checklist.prompt_template.label("checklist_prompt"),
             frames_done.label("frames_done"),
             frames_total.label("frames_total"),
             flagged.label("flagged_frames"),
         )
         .join(Video, Video.id == AiRun.video_id)
+        .join(Checklist, Checklist.id == AiRun.checklist_id)
         .where(Video.deleted_at.is_(None))
         .order_by(AiRun.created_at.desc())
     )
@@ -96,7 +100,8 @@ def list_runs(
     stmt = stmt.limit(limit).offset(offset)
 
     out: list[dict[str, Any]] = []
-    for run, external_ref, cid, done, total, flag in session.execute(stmt).all():
+    for row in session.execute(stmt).all():
+        run, external_ref, cid, cl_name, cl_version, cl_prompt, done, total, flag = row
         out.append(
             {
                 "id": str(run.id),
@@ -105,6 +110,10 @@ def list_runs(
                 "client_id": str(cid),
                 "model": run.model,
                 "prompt_version": run.prompt_version,
+                "checklist_id": str(run.checklist_id),
+                "checklist_name": cl_name,
+                "checklist_version": int(cl_version),
+                "prompt_is_custom": cl_prompt is not None,
                 "status": run.status.value,
                 "grade": float(run.grade) if run.grade is not None else None,
                 "frames_done": int(done),
@@ -218,6 +227,7 @@ def get_run(
         raise HTTPException(status_code=404, detail="run not found")
     video = session.get(Video, run.video_id)
     assert video is not None  # FK guarantees it
+    checklist = session.get(Checklist, run.checklist_id)
 
     rows = session.execute(
         select(AiFrameFinding, Frame)
@@ -266,6 +276,14 @@ def get_run(
         "model": run.model,
         "prompt_version": run.prompt_version,
         "checklist_id": str(run.checklist_id),
+        "checklist": {
+            "id": str(run.checklist_id),
+            "name": checklist.name if checklist else None,
+            "version": checklist.version if checklist else None,
+            "prompt_is_custom": bool(checklist and checklist.prompt_template),
+            # item defs let the UI render each finding by its type
+            "items": checklist.items if checklist else [],
+        },
         "status": run.status.value,
         "grade": ai_grade,
         "summary": run.summary,
@@ -294,21 +312,32 @@ def get_run(
 @router.post("/runs/{run_id}/rerun", response_model=JobAccepted, status_code=202)
 def rerun(
     run_id: uuid.UUID,
+    req: RerunRequest | None = None,
     session: Session = Depends(get_session),
     user: User = Depends(_admin),
 ) -> JobAccepted:
-    """Queue a fresh ai_review for the run's video, reusing its prompt_version.
+    """Queue a fresh ai_review for the run's video.
 
-    Creates a new run (history preserved) — never edits the existing one.
+    Creates a new run (history preserved) — never edits the existing one. By
+    default reuses the run's prompt_version and checklist; an optional body can
+    re-run against a different prompt_version and/or checklist_id (the pipeline's
+    _resolve_checklist honors payload.checklist_id).
     """
     run = session.get(AiRun, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
+    payload: dict[str, Any] = {"prompt_version": run.prompt_version}
+    if req is not None and req.prompt_version is not None:
+        payload["prompt_version"] = req.prompt_version
+    if req is not None and req.checklist_id is not None:
+        if session.get(Checklist, req.checklist_id) is None:
+            raise HTTPException(status_code=404, detail="checklist not found")
+        payload["checklist_id"] = str(req.checklist_id)
     job = enqueue(
         session,
         job_type=JobType.ai_review,
         video_id=run.video_id,
-        payload={"prompt_version": run.prompt_version},
+        payload=payload,
     )
     session.flush()
     return JobAccepted(job_id=job.id, job_type=job.job_type.value, status=job.status.value)
