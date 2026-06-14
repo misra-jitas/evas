@@ -226,6 +226,7 @@ interface RawBoard {
   source_label: string | null;
   original_filename: string | null;
   duration_seconds: number | null;
+  size_bytes: number | null;
   frame_count: number;
   checklist_name: string | null;
 }
@@ -247,6 +248,7 @@ function adaptBoard(r: RawBoard): BoardVideo {
     frames: r.frame_count,
     checklist: r.checklist_name,
     source: r.source_label,
+    sizeBytes: r.size_bytes,
   };
 }
 

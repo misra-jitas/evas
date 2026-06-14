@@ -81,6 +81,7 @@ def list_videos(
         SELECT b.*,
                v.original_filename,
                v.duration_seconds,
+               v.size_bytes,
                src.label AS source_label,
                (SELECT count(*) FROM frames f WHERE f.video_id = b.id) AS frame_count,
                COALESCE(run_cl.name, active_cl.name) AS checklist_name
