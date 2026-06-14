@@ -311,6 +311,15 @@ function RunDetail({ t, runId, onBack, onOpenDiscrepancy }: { t: TFn; runId: str
   const gap = run.gradeGap;
   const lowConf = run.frames.filter((f) => f.items.some((i) => i.conf < 0.6));
   const tokPerFrame = run.frames.length ? run.cost / run.frames.length : 0;
+  // Certainty distribution across every per-item finding in the run.
+  const allConf = run.frames.flatMap((f) => f.items.map((i) => i.conf));
+  const confBuckets = [
+    { l: "≥90%", n: allConf.filter((c) => c >= 0.9).length, c: "var(--green)" },
+    { l: "75–90%", n: allConf.filter((c) => c >= 0.75 && c < 0.9).length, c: "var(--green)" },
+    { l: "60–75%", n: allConf.filter((c) => c >= 0.6 && c < 0.75).length, c: "var(--amber)" },
+    { l: "<60%", n: allConf.filter((c) => c < 0.6).length, c: "var(--red)" },
+  ];
+  const maxBucket = Math.max(1, ...confBuckets.map((b) => b.n));
 
   return (
     <div style={{ height: "100%", overflow: "auto", background: "var(--bg)" }}>
@@ -492,6 +501,21 @@ function RunDetail({ t, runId, onBack, onOpenDiscrepancy }: { t: TFn; runId: str
                     <Ico name="x" size={14} /> 1 run-level error · {run.status === "failed" ? "no retries left" : "retried"}
                   </div>
                 )}
+              </div>
+            </div>
+            <div>
+              <div className="label" style={{ marginBottom: 9 }}>Certainty distribution</div>
+              <div className="panel" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 7 }}>
+                {confBuckets.map((b) => (
+                  <div key={b.l} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span className="mono tnum" style={{ fontSize: 10.5, color: "var(--ink-3)", width: 48, textAlign: "right" }}>{b.l}</span>
+                    <span style={{ flex: 1, height: 10, background: "var(--panel-3)", borderRadius: 3, overflow: "hidden" }}>
+                      <span style={{ display: "block", width: `${(b.n / maxBucket) * 100}%`, height: "100%", background: b.c, borderRadius: 3 }} />
+                    </span>
+                    <span className="mono tnum" style={{ fontSize: 11, fontWeight: 600, width: 32 }}>{b.n}</span>
+                  </div>
+                ))}
+                <span style={{ fontSize: 10.5, color: "var(--ink-4)" }}>per-item findings across {run.frames.length} frames</span>
               </div>
             </div>
             <div>
