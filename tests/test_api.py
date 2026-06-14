@@ -135,6 +135,53 @@ def test_video_media_and_frame_image_urls(
     assert {"key", "label"} <= set(detail["checklist_items"][0])
 
 
+def test_resample_endpoint(auth_headers, make_user, fake_s3, fake_ai, sample_video_bytes) -> None:
+    from evas.enums import JobType, UserRole
+    from evas.models import ProcessingJob
+
+    client_id = _seed_client()
+    source_uri = "s3://evas-videos/a/resample.mp4"
+    fake_s3.put(source_uri, sample_video_bytes)
+    client.post(
+        "/videos",
+        json={"client_id": str(client_id), "source_uri": source_uri},
+        headers=auth_headers,
+    )
+    while worker.run_once():
+        pass
+    with session_scope() as s:
+        video_id = s.scalars(select(Video.id)).one()
+
+    # Admin can resample with a new rate.
+    res = client.post(
+        f"/videos/{video_id}/resample",
+        json={"sampling_override": {"interval_seconds": 0.5, "max_frames": 6, "frame_width": 160}},
+        headers=auth_headers,
+    )
+    assert res.status_code == 202, res.text
+    with session_scope() as s:
+        v = s.get(Video, video_id)
+        assert v is not None and v.sampling_override["interval_seconds"] == 0.5
+        job = s.scalars(
+            select(ProcessingJob)
+            .where(
+                ProcessingJob.job_type == JobType.extract_frames,
+                ProcessingJob.video_id == video_id,
+            )
+            .order_by(ProcessingJob.queued_at.desc())
+        ).first()
+        assert job is not None and job.payload.get("resample") is True
+
+    # Reviewers cannot (admin-only, destructive).
+    _, reviewer_token = make_user(role=UserRole.reviewer)
+    denied = client.post(
+        f"/videos/{video_id}/resample", headers={"Authorization": f"Bearer {reviewer_token}"}
+    )
+    assert denied.status_code == 403
+    # Unknown video → 404.
+    assert client.post(f"/videos/{uuid.uuid4()}/resample", headers=auth_headers).status_code == 404
+
+
 def test_video_media_not_found(auth_headers) -> None:
     assert client.get(f"/videos/{uuid.uuid4()}/media", headers=auth_headers).status_code == 404
 

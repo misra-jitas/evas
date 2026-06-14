@@ -20,6 +20,12 @@ class VideoCreateRequest(BaseModel):
     priority: VideoPriority = VideoPriority.normal
 
 
+class ResampleRequest(BaseModel):
+    # Optional new sampling config to persist on the video before re-extracting
+    # (e.g. {"interval_seconds": 2, "max_frames": 300, "frame_width": 640}).
+    sampling_override: dict[str, Any] | None = None
+
+
 class JobAccepted(BaseModel):
     job_id: uuid.UUID
     job_type: str

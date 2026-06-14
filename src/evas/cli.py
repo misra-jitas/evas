@@ -153,6 +153,52 @@ def import_csv(csv_path: str, client_id: uuid.UUID) -> None:
     click.echo(f"enqueued {count} ingest job(s)")
 
 
+@cli.command("resample")
+@click.argument("video_id", type=click.UUID)
+@click.option("--interval", type=float, default=None, help="seconds between sampled frames")
+@click.option("--max-frames", type=int, default=None)
+@click.option("--frame-width", type=int, default=None)
+def resample(
+    video_id: uuid.UUID,
+    interval: float | None,
+    max_frames: int | None,
+    frame_width: int | None,
+) -> None:
+    """Force re-extraction of a video's frames, optionally at a new rate.
+
+    Drops existing frames (and their AI findings/notes) and re-samples; a new
+    ai_review is queued automatically. Run the worker to process it.
+    """
+    with session_scope() as session:
+        video = session.get(Video, video_id)
+        if video is None or video.deleted_at is not None:
+            raise click.ClickException(f"video {video_id} not found")
+        override = dict(video.sampling_override or {})
+        if interval is not None:
+            override["interval_seconds"] = interval
+        if max_frames is not None:
+            override["max_frames"] = max_frames
+        if frame_width is not None:
+            override["frame_width"] = frame_width
+        if override:
+            video.sampling_override = override
+        job = enqueue(
+            session,
+            job_type=JobType.extract_frames,
+            video_id=video.id,
+            payload={"resample": True},
+        )
+        write_audit(
+            session,
+            entity_type="video",
+            entity_id=video.id,
+            action="resample",
+            new_value={"sampling_override": video.sampling_override},
+        )
+        session.flush()
+        click.echo(f"queued resample (extract_frames) job {job.id} for video {video_id}")
+
+
 @cli.command("worker")
 def worker() -> None:
     """Run the polling worker in the foreground."""

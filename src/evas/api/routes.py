@@ -14,10 +14,12 @@ from evas.api.schemas import (
     AiRunOut,
     FrameFindingOut,
     JobAccepted,
+    ResampleRequest,
     ReviewBoardRow,
     VideoCreateRequest,
     VideoDetail,
 )
+from evas.audit import write_audit
 from evas.auth import (
     assert_can_access_client,
     get_current_user,
@@ -32,6 +34,7 @@ from evas.models import AiFrameFinding, Checklist, Frame, ProcessingJob, Source,
 
 router = APIRouter()
 _staff = require_roles(UserRole.admin, UserRole.reviewer)
+_admin = require_roles(UserRole.admin)
 
 
 @router.post("/videos", response_model=JobAccepted, status_code=202)
@@ -226,6 +229,39 @@ def get_video_media(
         if video.duration_seconds is not None
         else None,
     }
+
+
+@router.post("/videos/{video_id}/resample", response_model=JobAccepted, status_code=202)
+def resample_video(
+    video_id: uuid.UUID,
+    req: ResampleRequest | None = None,
+    session: Session = Depends(get_session),
+    user: User = Depends(_admin),
+) -> JobAccepted:
+    """Force re-extraction of frames (admin), optionally at a new sampling rate.
+
+    Destructive: the existing frames and their AI findings/notes are dropped and
+    re-sampled. A new ai_review is queued automatically afterwards.
+    """
+    video = _get_active_video(session, video_id)
+    if req is not None and req.sampling_override is not None:
+        video.sampling_override = req.sampling_override
+    job = enqueue(
+        session,
+        job_type=JobType.extract_frames,
+        video_id=video.id,
+        payload={"resample": True},
+    )
+    write_audit(
+        session,
+        entity_type="video",
+        entity_id=video.id,
+        action="resample",
+        new_value={"sampling_override": video.sampling_override},
+        user_id=user.id,
+    )
+    session.flush()
+    return JobAccepted(job_id=job.id, job_type=job.job_type.value, status=job.status.value)
 
 
 @router.get("/videos/{video_id}/export")
