@@ -209,6 +209,16 @@ class ClientOut(BaseModel):
     video_count: int
 
 
+# ---- AI Monitor ----
+class RerunRequest(BaseModel):
+    prompt_version: str | None = None
+    checklist_id: uuid.UUID | None = None
+
+
+class SendToHumanRequest(BaseModel):
+    reviewer_id: uuid.UUID
+
+
 # ---- Checklists (review config: items + prompt framing) ----
 class ChecklistSave(BaseModel):
     name: str

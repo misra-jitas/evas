@@ -5,7 +5,7 @@
 // renders against an empty or unauthenticated backend during development.
 import { useEffect, useState } from "react";
 import { D, sceneOf } from "./data";
-import type { AiRunDetail, AiStatGroup, AiStats, BoardVideo, AiRun, Checklist, Client, Frame, FrameItem, PortalVideo, Priority, Review, Source } from "./types";
+import type { AiRunDetail, AiStatGroup, AiStats, BoardVideo, AiRun, Checklist, Client, Frame, FrameItem, PortalVideo, Priority, Review, RunChecklistItem, Source } from "./types";
 
 const BASE: string = (import.meta.env.VITE_EVAS_API_BASE as string) || "/api";
 const BOOTSTRAP: string = (import.meta.env.VITE_EVAS_BOOTSTRAP_TOKEN as string) || "";
@@ -116,6 +116,9 @@ interface RawRun {
   client_id: string;
   model: string;
   prompt_version: string;
+  checklist_name: string;
+  checklist_version: number;
+  prompt_is_custom: boolean;
   status: AiRun["status"];
   grade: number | null;
   frames_done: number;
@@ -174,6 +177,9 @@ function adaptRun(r: RawRun): AiRun {
     sceneLabel: sceneOf(sceneFor(r.video_id)).label,
     model: r.model,
     prompt: r.prompt_version,
+    checklistName: r.checklist_name,
+    checklistVersion: r.checklist_version,
+    promptCustom: r.prompt_is_custom,
     status: r.status,
     done: r.frames_done,
     total: r.frames_total || r.frames_done,
@@ -298,21 +304,67 @@ interface RawRunDetail {
   duration_seconds: number | null;
   cost: { tokens_in: number; tokens_out: number; cost_usd: number; cost_per_frame: number | null };
   issues: { flagged_count: number };
+  triage?: { count: number; frame_indices: number[]; counts: { low_confidence: number; non_compliant: number; sample: number } };
+  human?: { grade: number | null; grade_gap: number | null };
+  checklist?: {
+    id: string;
+    name: string | null;
+    version: number | null;
+    prompt_is_custom: boolean;
+    items: RunChecklistItem[];
+  };
   frames: RawDetailFrame[];
 }
+
 const yesNo = (v: unknown): string => (v === true || v === "Yes" || v === "yes" ? "Yes" : "No");
+
+// Render an AI finding for one item by its type; returns a label + AI compliance
+// (null = informational, e.g. text, or no compliant target declared).
+function renderFinding(item: RunChecklistItem, val: any): { display: string; compliant: boolean | null } {
+  const t = item.type || "boolean";
+  if (t === "category") {
+    const v = val?.value ?? null;
+    const ok = item.compliant_values?.length ? item.compliant_values.includes(v) : null;
+    return { display: v ?? "—", compliant: ok };
+  }
+  if (t === "multi_boolean") {
+    const vals = (val?.values || {}) as Record<string, boolean>;
+    const parts = Object.entries(vals).map(([k, b]) => `${k} ${b ? "✓" : "✗"}`);
+    return { display: parts.join(", ") || "—", compliant: parts.length ? Object.values(vals).every(Boolean) : null };
+  }
+  if (t === "text") {
+    return { display: val?.text || "—", compliant: null };
+  }
+  if (t === "number") {
+    const v = val?.value;
+    const r = item.compliant_range;
+    const inRange = r && typeof v === "number" ? v >= r[0] && v <= r[1] : null;
+    return { display: v == null ? "—" : String(v), compliant: inRange };
+  }
+  return { display: val?.value === true ? "Yes" : "No", compliant: val?.value === true };
+}
+
 function adaptRunDetail(r: RawRunDetail): AiRunDetail {
   const scene = sceneFor(r.video_id);
+  const itemDefs = r.checklist?.items || [];
+  const defByKey = new Map(itemDefs.map((it) => [it.key, it]));
   const frames: Frame[] = r.frames.map((f) => {
-    const items: FrameItem[] = Object.entries(f.findings || {}).map(([key, val]) => ({
-      key,
-      label: key,
-      expect: "",
-      risk: false,
-      aiValue: yesNo(val?.value),
-      conf: val?.confidence ?? 0,
-      state: "pending",
-    }));
+    const items: FrameItem[] = Object.entries(f.findings || {}).map(([key, val]) => {
+      const def = defByKey.get(key) || { key };
+      const { display, compliant } = renderFinding(def, val);
+      return {
+        key,
+        label: def.label || key,
+        expect: "",
+        risk: false,
+        aiValue: display,
+        display,
+        itemType: def.type || "boolean",
+        compliant,
+        conf: val?.confidence ?? 0,
+        state: "pending" as const,
+      };
+    });
     return { id: `fr-${f.frame_index}`, idx: f.frame_index, t: f.timecode_seconds, timecode: f.timecode_label, scene, hue: sceneOf(scene).hue, flagged: f.flagged, touched: false, note: "", desc: f.description || "", items, src: f.image_url };
   });
   return {
@@ -324,11 +376,25 @@ function adaptRunDetail(r: RawRunDetail): AiRunDetail {
     sceneLabel: sceneOf(scene).label,
     model: r.model,
     prompt: r.prompt_version,
+    checklistName: r.checklist?.name || "—",
+    checklistVersion: r.checklist?.version ?? 0,
+    promptCustom: r.checklist?.prompt_is_custom ?? false,
+    checklistId: r.checklist?.id || "",
+    items: itemDefs,
     status: r.status,
     done: frames.length,
     total: frames.length,
     grade: r.grade,
     flagged: r.issues?.flagged_count ?? 0,
+    humanGrade: r.human?.grade ?? null,
+    gradeGap: r.human?.grade_gap ?? null,
+    triage: {
+      count: r.triage?.count ?? 0,
+      lowConfidence: r.triage?.counts?.low_confidence ?? 0,
+      nonCompliant: r.triage?.counts?.non_compliant ?? 0,
+      sample: r.triage?.counts?.sample ?? 0,
+      indices: r.triage?.frame_indices ?? [],
+    },
     tokIn: r.cost.tokens_in,
     tokOut: r.cost.tokens_out,
     tokens: r.cost.tokens_in + r.cost.tokens_out,
@@ -566,7 +632,14 @@ export const api = {
     }));
     return review.id;
   },
-  rerun: (id: string) => request(`/ai/runs/${id}/rerun`, { method: "POST" }),
+  rerun: (id: string, body?: { prompt_version?: string; checklist_id?: string }) =>
+    request(`/ai/runs/${id}/rerun`, body ? jsonInit("POST", body) : { method: "POST" }),
+  listReviewers: () => request<{ id: string; name: string; role: string }[]>("/reviewers"),
+  sendToHuman: (runId: string, reviewerId: string) =>
+    request<{ review_id: string; reviewer_id: string }>(
+      `/ai/runs/${runId}/send-to-human`,
+      jsonInit("POST", { reviewer_id: reviewerId }),
+    ),
   adminMetrics: () =>
     request<{ dead_jobs: number; queue_depth: number; running_jobs: number; webhook_failures: number }>(
       "/admin/metrics",

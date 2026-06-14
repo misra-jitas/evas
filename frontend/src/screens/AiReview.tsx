@@ -3,7 +3,7 @@
 // POST /ai/runs/{id}/rerun); the sparkline aggregate strip and drill-down keep
 // the prototype's rich mock visuals (the live /ai/stats has no spark series).
 import { useEffect, useState } from "react";
-import { api, useLive } from "../api";
+import { api, type ChecklistConfig, useLive } from "../api";
 import {
   Btn,
   ClientChip,
@@ -202,7 +202,12 @@ function RunRow({ r, t, last, onClick, onRerun }: { r: AiRun; t: TFn; last: bool
           <div className="mono" style={{ fontSize: 12.5, fontWeight: 600 }}>{r.ref}</div>
           <div style={{ marginTop: 2 }}><ClientChip client={r.clientObj} mono /></div>
         </div>
-        <span className="mono" style={{ fontSize: 11.5, color: "var(--ink-2)" }}>{r.model} · {r.prompt}</span>
+        <span style={{ minWidth: 0 }}>
+          <span className="mono" style={{ display: "block", fontSize: 11.5, color: "var(--ink-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.model} · {r.prompt}</span>
+          <span className="mono" style={{ display: "block", fontSize: 10.5, color: "var(--ink-3)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {r.checklistName} v{r.checklistVersion}{r.promptCustom ? " · custom" : ""}
+          </span>
+        </span>
         <div>
           <StatusBadge status={r.status} size="sm" />
           {running && (
@@ -246,9 +251,44 @@ function RunDetail({ t, runId, onBack, onOpenDiscrepancy }: { t: TFn; runId: str
   const detail = useLive<AiRunDetail | null>(() => api.runDetail(runId), null, [runId]);
   const run = detail.data;
   const [selFrame, setSelFrame] = useState<string | null>(null);
+  // Re-run controls: optionally against a different checklist version of this client.
+  const clId = run?.client || "";
+  const checklists = useLive<ChecklistConfig[]>(
+    () => (clId ? api.listChecklists(clId) : Promise.resolve([])),
+    [],
+    [clId],
+  );
+  const [rerunChecklist, setRerunChecklist] = useState<string>("");
+  const [rerunBusy, setRerunBusy] = useState(false);
+  // Send-to-human controls.
+  const reviewers = useLive<{ id: string; name: string; role: string }[]>(() => api.listReviewers(), [], []);
+  const [reviewerId, setReviewerId] = useState("");
+  const [sendBusy, setSendBusy] = useState(false);
+  const [sent, setSent] = useState(false);
   useEffect(() => {
     if (run && run.frames[0]) setSelFrame((cur) => cur ?? run.frames[0].id);
   }, [run]);
+
+  function sendToHuman() {
+    if (!run || !reviewerId) return;
+    setSendBusy(true);
+    api
+      .sendToHuman(run.id, reviewerId)
+      .then(() => setSent(true))
+      .catch(() => {})
+      .finally(() => setSendBusy(false));
+  }
+
+  function doRerun() {
+    if (!run) return;
+    setRerunBusy(true);
+    const body = rerunChecklist ? { checklist_id: rerunChecklist } : undefined;
+    api
+      .rerun(run.id, body)
+      .then(() => onBack())
+      .catch(() => {})
+      .finally(() => setRerunBusy(false));
+  }
 
   if (!run) {
     return (
@@ -266,12 +306,20 @@ function RunDetail({ t, runId, onBack, onOpenDiscrepancy }: { t: TFn; runId: str
   const scene = sceneOf(run.scene);
   const selected = run.frames.find((f) => f.id === selFrame) || run.frames[0];
 
-  // Mock visual: fabricate a stable per-run human grade (no live source yet).
-  const jitter = run.id.charCodeAt(run.id.length - 1) % 2 ? -2 : 1.5;
-  const humanGrade = run.grade != null ? Math.round((run.grade + jitter) * 2) / 2 : null;
-  const gap = humanGrade != null && run.grade != null ? Math.abs(run.grade - humanGrade) : null;
+  // Real human grade + gap from the API (null until a human has reviewed).
+  const humanGrade = run.humanGrade;
+  const gap = run.gradeGap;
   const lowConf = run.frames.filter((f) => f.items.some((i) => i.conf < 0.6));
   const tokPerFrame = run.frames.length ? run.cost / run.frames.length : 0;
+  // Certainty distribution across every per-item finding in the run.
+  const allConf = run.frames.flatMap((f) => f.items.map((i) => i.conf));
+  const confBuckets = [
+    { l: "≥90%", n: allConf.filter((c) => c >= 0.9).length, c: "var(--green)" },
+    { l: "75–90%", n: allConf.filter((c) => c >= 0.75 && c < 0.9).length, c: "var(--green)" },
+    { l: "60–75%", n: allConf.filter((c) => c >= 0.6 && c < 0.75).length, c: "var(--amber)" },
+    { l: "<60%", n: allConf.filter((c) => c < 0.6).length, c: "var(--red)" },
+  ];
+  const maxBucket = Math.max(1, ...confBuckets.map((b) => b.n));
 
   return (
     <div style={{ height: "100%", overflow: "auto", background: "var(--bg)" }}>
@@ -289,7 +337,8 @@ function RunDetail({ t, runId, onBack, onOpenDiscrepancy }: { t: TFn; runId: str
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
                 <Tag label={t("ai.model")} value={run.model} />
-                <Tag label="prompt" value={run.prompt} />
+                <Tag label="prompt" value={run.prompt + (run.promptCustom ? " · custom" : "")} />
+                <Tag label="checklist" value={`${run.checklistName} v${run.checklistVersion}`} />
                 <Tag label={t("ai.tokens")} value={(run.tokens / 1000).toFixed(0) + "k"} />
                 <Tag label={t("ai.cost")} value={"$" + run.cost.toFixed(2)} />
                 <Tag label={t("ai.duration")} value={run.dur == null ? "running" : run.dur + "s"} />
@@ -323,6 +372,21 @@ function RunDetail({ t, runId, onBack, onOpenDiscrepancy }: { t: TFn; runId: str
               <span className="mono" style={{ fontSize: 12, color: "var(--red)" }}>{run.error}</span>
             </div>
           )}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line-2)", flexWrap: "wrap" }}>
+            <span className="label">Re-run review</span>
+            <Select
+              value={rerunChecklist}
+              onChange={setRerunChecklist}
+              options={[
+                { v: "", l: "Same checklist (re-review)" },
+                ...checklists.data.map((c) => ({ v: c.id, l: `${c.name} v${c.version}${c.is_active ? " · active" : ""}` })),
+              ]}
+            />
+            <Btn kind="default" size="sm" icon="refresh" disabled={rerunBusy} onClick={doRerun}>
+              {rerunBusy ? "Queuing…" : "Re-run"}
+            </Btn>
+            <span style={{ fontSize: 11, color: "var(--ink-4)" }}>Creates a new run; history is preserved.</span>
+          </div>
         </div>
 
         <div className="label" style={{ marginBottom: 9 }}>{t("ai.timeline")} · <span style={{ color: "var(--ink-2)" }}>{run.frames.length}/{run.allCount} {t("ai.frames")}</span></div>
@@ -364,20 +428,55 @@ function RunDetail({ t, runId, onBack, onOpenDiscrepancy }: { t: TFn; runId: str
                     <p style={{ margin: "5px 0 0", fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.5 }}>{selected.desc}</p>
                   </div>
                 </div>
-                {selected.items.map((it, i) => (
-                  <div key={it.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 13px", borderBottom: i < selected.items.length - 1 ? "1px solid var(--line-2)" : "none" }}>
-                    <span style={{ flex: 1, fontSize: 12.5, display: "flex", alignItems: "center", gap: 6 }}>
-                      {it.label} {it.risk && <Ico name="shield" size={11} stroke="var(--violet)" />}
-                    </span>
-                    <span className="mono" style={{ fontSize: 11, fontWeight: 600, padding: "1px 6px", borderRadius: 3, background: it.aiValue !== it.expect ? "var(--red-bg)" : "var(--panel-3)", color: it.aiValue !== it.expect ? "var(--red)" : "var(--ink-2)" }}>{it.aiValue}</span>
-                    <ConfBar v={it.conf} />
-                  </div>
-                ))}
+                {selected.items.map((it, i) => {
+                  // Color by AI compliance: false → red, true → neutral, null (text/no target) → muted.
+                  const bad = it.compliant === false;
+                  return (
+                    <div key={it.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 13px", borderBottom: i < selected.items.length - 1 ? "1px solid var(--line-2)" : "none" }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.label}</span>
+                        <span className="label" style={{ fontSize: 9, flexShrink: 0 }}>{it.itemType && it.itemType !== "boolean" ? it.itemType : ""}</span>
+                      </span>
+                      <span className="mono" title={it.display} style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 600, padding: "1px 6px", borderRadius: 3, background: bad ? "var(--red-bg)" : "var(--panel-3)", color: bad ? "var(--red)" : "var(--ink-2)" }}>{it.display ?? it.aiValue}</span>
+                      <ConfBar v={it.conf} />
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            <div>
+              <div className="label" style={{ marginBottom: 9 }}>Send to human review</div>
+              <div className="panel" style={{ padding: 14 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                  <span className="mono tnum" style={{ fontSize: 22, fontWeight: 700, color: run.triage.count ? "var(--amber)" : "var(--green)" }}>{run.triage.count}</span>
+                  <span style={{ fontSize: 12.5, color: "var(--ink-2)" }}>frames to verify</span>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px", marginTop: 8, fontSize: 11.5, color: "var(--ink-3)" }}>
+                  <span><b style={{ color: "var(--ink-2)" }}>{run.triage.lowConfidence}</b> low-confidence</span>
+                  <span><b style={{ color: "var(--ink-2)" }}>{run.triage.nonCompliant}</b> AI-failed</span>
+                  <span><b style={{ color: "var(--ink-2)" }}>{run.triage.sample}</b> sampled</span>
+                </div>
+                {sent ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, color: "var(--green)", fontSize: 12.5 }}>
+                    <Ico name="check" size={15} /> Assigned to a reviewer.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                    <Select
+                      value={reviewerId}
+                      onChange={setReviewerId}
+                      options={[{ v: "", l: "Pick reviewer…" }, ...reviewers.data.map((u) => ({ v: u.id, l: `${u.name} (${u.role})` }))]}
+                    />
+                    <Btn kind="primary" size="sm" icon="user" disabled={!reviewerId || sendBusy} onClick={sendToHuman}>
+                      {sendBusy ? "Assigning…" : "Send"}
+                    </Btn>
+                  </div>
+                )}
+              </div>
+            </div>
             <div>
               <div className="label" style={{ marginBottom: 9 }}>{t("ai.issuespanel")}</div>
               <div className="panel" style={{ padding: 14 }}>
@@ -402,6 +501,21 @@ function RunDetail({ t, runId, onBack, onOpenDiscrepancy }: { t: TFn; runId: str
                     <Ico name="x" size={14} /> 1 run-level error · {run.status === "failed" ? "no retries left" : "retried"}
                   </div>
                 )}
+              </div>
+            </div>
+            <div>
+              <div className="label" style={{ marginBottom: 9 }}>Certainty distribution</div>
+              <div className="panel" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 7 }}>
+                {confBuckets.map((b) => (
+                  <div key={b.l} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span className="mono tnum" style={{ fontSize: 10.5, color: "var(--ink-3)", width: 48, textAlign: "right" }}>{b.l}</span>
+                    <span style={{ flex: 1, height: 10, background: "var(--panel-3)", borderRadius: 3, overflow: "hidden" }}>
+                      <span style={{ display: "block", width: `${(b.n / maxBucket) * 100}%`, height: "100%", background: b.c, borderRadius: 3 }} />
+                    </span>
+                    <span className="mono tnum" style={{ fontSize: 11, fontWeight: 600, width: 32 }}>{b.n}</span>
+                  </div>
+                ))}
+                <span style={{ fontSize: 10.5, color: "var(--ink-4)" }}>per-item findings across {run.frames.length} frames</span>
               </div>
             </div>
             <div>

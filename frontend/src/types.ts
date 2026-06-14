@@ -56,6 +56,19 @@ export interface FrameItem {
   aiValue: string;
   conf: number;
   state: ItemState;
+  itemType?: string; // boolean | category | multi_boolean | text | number (run detail)
+  display?: string; // type-aware rendered answer (run detail)
+  compliant?: boolean | null; // AI compliance for this item (null = informational/text)
+}
+
+// Minimal checklist item shape carried on a run detail, for type-aware rendering.
+export interface RunChecklistItem {
+  key: string;
+  label?: string;
+  type?: string;
+  options?: string[] | { key: string; label?: string }[];
+  compliant_values?: string[];
+  compliant_range?: [number, number];
 }
 
 export interface Frame {
@@ -127,6 +140,9 @@ export interface AiRun {
   scene: string;
   model: string;
   prompt: string;
+  checklistName: string;
+  checklistVersion: number;
+  promptCustom: boolean;
   status: RunStatus;
   done: number;
   total: number;
@@ -141,7 +157,23 @@ export interface AiRun {
   error?: string;
 }
 
-export type AiRunDetail = AiRun & { frames: Frame[]; allCount: number };
+export interface Triage {
+  count: number;
+  lowConfidence: number;
+  nonCompliant: number;
+  sample: number;
+  indices: number[];
+}
+
+export type AiRunDetail = AiRun & {
+  frames: Frame[];
+  allCount: number;
+  checklistId: string;
+  items: RunChecklistItem[];
+  humanGrade: number | null;
+  gradeGap: number | null;
+  triage: Triage;
+};
 
 export interface SparkSet {
   videosHr: number[];

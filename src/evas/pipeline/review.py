@@ -35,6 +35,7 @@ from evas.models import (
     Video,
 )
 from evas.storage import get_object_bytes
+from evas.triage import frame_below_threshold
 from evas.webhooks import EVENT_AI_REVIEWED, enqueue_notify
 
 
@@ -114,7 +115,8 @@ def _review_frames(session: Session, job: ProcessingJob, video: Video) -> None:
     for frame in frames:
         result = reviewer.review_frame(get_object_bytes(frame.image_uri), items)
         min_conf = _min_conf(result.findings)
-        flagged = min_conf < threshold
+        # Honor optional per-item min_confidence (items JSON), else the global threshold.
+        flagged = frame_below_threshold(result.findings, items, threshold)
         flagged_count += int(flagged)
         session.add(
             AiFrameFinding(
@@ -196,7 +198,7 @@ def _review_clips(session: Session, job: ProcessingJob, video: Video) -> None:
         images = [get_object_bytes(f.image_uri) for f in frames] or [b"\x00"]
         result = reviewer.review_clip(images, items)
         min_conf = _min_conf(result.findings)
-        flagged = min_conf < threshold
+        flagged = frame_below_threshold(result.findings, items, threshold)
         flagged_count += int(flagged)
         session.add(
             AiClipFinding(

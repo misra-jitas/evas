@@ -312,6 +312,9 @@ const AI_RUNS: AiRun[] = RUN_DEF.map((r, i) => ({
   clientObj: clientOf(r.client),
   sceneLabel: SCENES.find((s) => s.id === r.scene)!.label,
   tokens: r.tokIn + r.tokOut,
+  checklistName: "workstation_v1",
+  checklistVersion: 1,
+  promptCustom: false,
 }));
 
 const AI_QUEUED = 7;
@@ -335,7 +338,7 @@ function getRun(id: string): AiRunDetail {
   for (let i = 0; i < r.flagged; i++) flaggedIdx.push(Math.floor((i + 1) * (r.total / (r.flagged + 1))));
   const allFrames = buildFrames(r.scene, r.total, flaggedIdx);
   const doneFrames = allFrames.slice(0, r.done);
-  return { ...r, frames: doneFrames, allCount: r.total };
+  return { ...r, frames: doneFrames, allCount: r.total, checklistId: "cl-mock", items: [], humanGrade: null, gradeGap: null, triage: { count: r.flagged, lowConfidence: r.flagged, nonCompliant: 0, sample: 0, indices: flaggedIdx } };
 }
 
 const PORTAL_VIDEOS: PortalVideo[] = [
