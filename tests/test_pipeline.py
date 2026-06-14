@@ -90,6 +90,50 @@ def test_full_pipeline(fake_s3, fake_ai, sample_video_bytes) -> None:
         assert len(status_changes) == 3
 
 
+def test_resample_reextracts_at_new_rate(fake_s3, fake_ai, sample_video_bytes) -> None:
+    client_id = _seed_client()  # interval 1s, max_frames 3
+    source_uri = "s3://evas-videos/acme/resample.mp4"
+    fake_s3.put(source_uri, sample_video_bytes)
+    with session_scope() as s:
+        enqueue(
+            s,
+            job_type=JobType.ingest,
+            payload={"client_id": str(client_id), "source_uri": source_uri},
+        )
+    _drain()
+
+    with session_scope() as s:
+        video = s.scalars(select(Video)).one()
+        vid = video.id
+        before = s.scalar(select(func.count()).select_from(Frame).where(Frame.video_id == vid))
+
+        # Re-enqueue extract WITHOUT resample → idempotent no-op (count unchanged).
+        enqueue(s, job_type=JobType.extract_frames, video_id=vid)
+    _drain()
+    with session_scope() as s:
+        same = s.scalar(select(func.count()).select_from(Frame).where(Frame.video_id == vid))
+        assert same == before
+
+        # Change the rate and force a resample.
+        video = s.get(Video, vid)
+        assert video is not None
+        video.sampling_override = {"interval_seconds": 0.5, "max_frames": 6, "frame_width": 160}
+        enqueue(s, job_type=JobType.extract_frames, video_id=vid, payload={"resample": True})
+    _drain()
+
+    with session_scope() as s:
+        after = s.scalar(select(func.count()).select_from(Frame).where(Frame.video_id == vid))
+        assert after > before  # denser sample at 0.5s vs 1s
+        # A fresh ai_review ran on the new frames; old findings were cascade-deleted.
+        runs = s.scalars(select(AiRun).where(AiRun.video_id == vid)).all()
+        assert len(runs) >= 2
+        latest = max(runs, key=lambda r: r.created_at)
+        findings = s.scalars(
+            select(AiFrameFinding).where(AiFrameFinding.ai_run_id == latest.id)
+        ).all()
+        assert len(findings) == after
+
+
 def test_ingest_dedup(fake_s3, sample_video_bytes) -> None:
     client_id = _seed_client()
     source_uri = "s3://evas-videos/acme/dup.mp4"
