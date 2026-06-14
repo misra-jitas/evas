@@ -87,6 +87,8 @@ def test_list_detail_export(auth_headers, fake_s3, fake_ai, sample_video_bytes) 
     assert len(rows) == 1
     assert rows[0]["status"] == "ai_reviewed"
     assert rows[0]["ai_grade"] is not None
+    assert rows[0]["size_bytes"] > 0  # real file size from ffprobe, shown on the source detail
+    assert rows[0]["duration_seconds"] is not None and rows[0]["frame_count"] == 2
 
     detail = client.get(f"/videos/{video_id}", headers=auth_headers)
     assert detail.status_code == 200

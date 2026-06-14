@@ -10,7 +10,6 @@ import {
   EmptyState,
   Field,
   fieldInput,
-  FrameThumb,
   FunnelBar,
   Grade,
   Ico,
@@ -22,8 +21,21 @@ import {
   StatusBadge,
   Toggle,
 } from "../components";
-import { D, sceneOf } from "../data";
+import { D } from "../data";
 import type { SelectOption } from "../components";
+
+const DETAIL_COLS = "1.3fr 90px 84px 70px 120px 60px 32px";
+
+function fmtSize(bytes: number | null): string {
+  if (bytes == null) return "—";
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+function fmtDur(s: number | null): string {
+  if (s == null) return "—";
+  const m = Math.floor(s / 60);
+  return `${m}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+}
 import type { BoardVideo, Source, TFn } from "../types";
 
 // Raw VideoStatus -> StatusBadge token key.
@@ -436,16 +448,17 @@ function SourceDetail({ t, src, onBack, onSync, onOpenReview }: { t: TFn; src: S
           <EmptyState icon="film" title="No videos discovered yet" sub="Run a sync to enumerate this source." />
         ) : (
           <div className="panel" style={{ overflow: "hidden" }}>
-            <Row head cols="48px 1.1fr 90px 130px 70px 70px">
-              {["", t("queue.ref"), t("queue.scene"), t("portal.status"), "AI", ""].map((h, i) => (
-                <span key={i} className="label" style={{ textAlign: i === 4 ? "right" : "left" }}>{h}</span>
+            <Row head cols={DETAIL_COLS}>
+              {[t("queue.ref"), "Size", "Duration", "Frames", t("portal.status"), "AI", ""].map((h, i) => (
+                <span key={i} className="label" style={{ textAlign: i >= 1 && i <= 3 ? "right" : i === 5 ? "right" : "left" }}>{h}</span>
               ))}
             </Row>
             {vids.map((v, i) => (
-              <Row key={v.id} cols="48px 1.1fr 90px 130px 70px 70px" last={i === vids.length - 1} onClick={() => onOpenReview(v.id)}>
-                <FrameThumb frame={{ hue: sceneOf(v.scene).hue }} style={{ width: 40, height: 24 }} showHud={false} />
-                <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{v.ref}</span>
-                <span className="mono" style={{ fontSize: 11, color: "var(--ink-2)" }}>{sceneOf(v.scene).label}</span>
+              <Row key={v.id} cols={DETAIL_COLS} last={i === vids.length - 1} onClick={() => onOpenReview(v.id)}>
+                <span className="mono" style={{ fontWeight: 600, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.ref}</span>
+                <span className="mono tnum" style={{ textAlign: "right", fontSize: 12, color: "var(--ink-2)" }}>{fmtSize(v.sizeBytes)}</span>
+                <span className="mono tnum" style={{ textAlign: "right", fontSize: 12, color: "var(--ink-2)" }}>{fmtDur(v.duration)}</span>
+                <span className="mono tnum" style={{ textAlign: "right", fontSize: 12, color: "var(--ink-2)" }}>{v.frames || "—"}</span>
                 <StatusBadge status={VIDEO_PILL[v.status] || "processing"} size="sm" />
                 <span style={{ textAlign: "right" }}><Grade value={v.aiGrade} size={12.5} /></span>
                 <span style={{ textAlign: "right", color: "var(--ink-4)" }}><Ico name="chevR" size={15} /></span>

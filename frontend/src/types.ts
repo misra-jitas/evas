@@ -263,6 +263,7 @@ export interface BoardVideo {
   frames: number;
   checklist: string | null;
   source: string | null;
+  sizeBytes: number | null;
 }
 
 export interface PortalVideo {
