@@ -12,7 +12,7 @@ import tempfile
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from evas.audit import record_status_change
@@ -46,6 +46,12 @@ def handle_extract_frames(session: Session, job: ProcessingJob) -> None:
     existing = session.scalar(
         select(func.count()).select_from(Frame).where(Frame.video_id == video.id)
     )
+    if existing and job.payload.get("resample"):
+        # Force re-extraction at the current sampling config: drop the old frames
+        # (cascades ai_frame_findings + human_frame_notes) so we re-sample below.
+        session.execute(delete(Frame).where(Frame.video_id == video.id))
+        session.flush()
+        existing = 0
     if existing:
         # Already extracted (likely a retry); ensure downstream is queued.
         _advance(session, video)
